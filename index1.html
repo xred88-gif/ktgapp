@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reports Dashboard</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      color: white;
+      margin: 0;
+      padding: 40px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 2.5em;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+    }
+
+    .top-right {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    .login-btn {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      background: linear-gradient(135deg, #ff9a9e, #fad0c4);
+      color: black;
+      transition: all 0.3s ease-in-out;
+    }
+
+    .login-btn:hover {
+      transform: translateY(-3px);
+      background: linear-gradient(135deg, #fad0c4, #ff9a9e);
+    }
+
+    .section {
+      margin: 40px auto;
+      max-width: 1200px;
+    }
+
+    .section h2 {
+      font-size: 1.8em;
+      margin-bottom: 20px;
+      border-bottom: 2px solid rgba(255,255,255,0.2);
+      padding-bottom: 10px;
+      display: inline-block;
+    }
+
+    .divider {
+      border-top: 2px solid rgba(255,255,255,0.2);
+      margin: 50px auto;
+      width: 80%;
+    }
+
+    .btn-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      padding: 15px;
+      font-size: 1.1em;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.3s ease-in-out;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    .creation {
+      background: linear-gradient(135deg, #4facfe, #00f2fe);
+      color: white;
+    }
+
+    .creation:hover {
+      transform: translateY(-5px);
+      background: linear-gradient(135deg, #00f2fe, #4facfe);
+    }
+
+    .item-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .item-card {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 15px;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    .item-title {
+      font-size: 1.1em;
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+
+    .small-btn {
+      padding: 8px 12px;
+      font-size: 0.9em;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 5px;
+      transition: all 0.3s ease-in-out;
+    }
+
+    /* Dropdown Styles */
+    .dropdown {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+    }
+
+    .dropbtn {
+      width: 100%;
+      text-align: left;
+      padding: 15px;
+      font-size: 1.1em;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: bold;
+      color: white;
+      background: linear-gradient(135deg, #4facfe, #00f2fe);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      transition: all 0.3s ease-in-out;
+    }
+
+    .dropbtn:hover {
+      transform: translateY(-5px);
+      background: linear-gradient(135deg, #00f2fe, #4facfe);
+    }
+
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      background-color: rgba(0,0,0,0.9);
+      min-width: 100%;
+      border-radius: 8px;
+      box-shadow: 0px 8px 16px rgba(0,0,0,0.3);
+      z-index: 1;
+    }
+
+    .dropdown-content a {
+      color: white;
+      padding: 12px 16px;
+      text-decoration: none;
+      display: block;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .dropdown-content a:last-child {
+      border-bottom: none;
+    }
+
+    .dropdown-content a:hover {
+      background-color: rgba(255,255,255,0.1);
+    }
+
+    .dropdown.active .dropdown-content {
+      display: block;
+    }
+
+    @media (max-width: 600px) {
+      .btn-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-right">
+    <button class="login-btn" onclick="window.open('https://app.nuvioway.com/', '_blank')">Staff Login</button>
+  </div>
+
+  <!-- Templates & SOPs Section -->
+  <div class="section">
+    <h2>Templates & SOPs</h2>
+    <div class="item-grid" id="templatesContainer"></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Date Range Calculator Section -->
+  <div class="section">
+    <h2>Date Range Calculator</h2>
+
+    <div class="item-card">
+      <h3>Auto Calculation (Based on Today)</h3>
+      <div id="autoResults" class="result"></div>
+    </div>
+
+    <div class="item-card">
+      <h3>Manual Date Input</h3>
+      <label>Enter Date (DD/MM/YYYY):</label><br>
+      <input type="text" id="manualDate" placeholder="dd/mm/yyyy" class="small-btn">
+      <button class="btn creation" onclick="calculateManual()">Calculate</button>
+      <div id="manualResults" class="result"></div>
+    </div>
+
+    <div class="item-card">
+      <h3>Previous 4 Weeks</h3>
+      <div id="weeksResults" class="result"></div>
+    </div>
+  </div>
+
+  <script>
+    // Dropdown toggle function
+    function toggleDropdown() {
+      document.getElementById("reportDropdown").classList.toggle("active");
+    }
+
+    // Close dropdown when clicking outside
+    window.onclick = function(event) {
+      if (!event.target.matches('.dropbtn')) {
+        var dropdowns = document.getElementsByClassName("dropdown");
+        for (var i = 0; i < dropdowns.length; i++) {
+          dropdowns[i].classList.remove('active');
+        }
+      }
+    }
+
+    // Templates & SOPs full list
+    const items = [
+      { name: "Bleeder 1.0", template: "https://docs.google.com/spreadsheets/d/1IDKg4vITIo-5JkQICAwNwU0vaKVNL8AnDyKrxxH-Ye0/edit?usp=sharing", sop: "https://docs.google.com/document/d/1E4ZH8wW-Pk93lxc0C29mPfKKT547ryI4LtEpuGOJ0Hk/edit?tab=t.0#heading=h.2hken2bgxj7l" },
+      { name: "Bleeder 2.0", template: "https://docs.google.com/spreadsheets/d/1Kc82LmmtCuQNQseUrBjY51zxUdciHjAaUKGgEZRVxWs/edit?usp=sharing", sop: "https://example.com/sop2" },
+      { name: "Placement Report", template: "https://docs.google.com/spreadsheets/d/1HcUoM0LceNeiJJTGyxQonY_A_yrwrX-qOSW6RkwWZ4Q/edit?usp=sharing", sop: "https://docs.google.com/document/d/1E_CeuW1ChUtKaY3L7oq9nN8BRJJgxjbkTSdM0lQ_pqo/edit?tab=t.0" },
+      { name: "Bidding Report", template: "https://docs.google.com/spreadsheets/d/1od3kvc-nuwCriT19nHqFvUgYBfUthSyxF_XCChnDB4I/edit?usp=sharing", sop: "https://docs.google.com/document/d/1_LajZ40-OkXvG575_j64XM0kT2WRYooth0BdFIxeyuo/edit?tab=t.0#heading=h.e1oxkn971ok6" },
+      { name: "Main KW tracking", template: "https://docs.google.com/spreadsheets/d/1JMaszXz6Q5yQoUKMJkwbApOaECjWmolGQLhwTqTKNrc/edit?usp=sharing", sop: "https://docs.google.com/document/d/1w3x1HmlW-8ONM8bxcZNh4TL26NN3CkcwWRwDQkAPg_o/edit?tab=t.0#heading=h.2hken2bgxj7l" },
+      { name: "Search Term Harvesting", template: "https://docs.google.com/spreadsheets/d/1RZYfvexJdUm0Bmz0rCEhx956gzuiJulNoUkckJvszA4/edit?usp=sharing", sop: "https://docs.google.com/document/d/1Sjk2IOkBbACSrRZ6GJwq30KOCeK1UkGdRdh1K30pXC0/edit?tab=t.0#heading=h.ige84pq32lq2" },
+      { name: "Ad Types", template: "https://docs.google.com/spreadsheets/d/1LNmiSLTsT9zwgWsiKHpezGj_cp85aNWBZn5MTLFRh3c/edit?usp=sharing", sop: "https://docs.google.com/document/d/1YJDFYOZLG-LD6-rC76kvHzbXX_sElSS22v8irp6L8IM/edit?tab=t.0#heading=h.vqny39b64xz0" },
+      { name: "Ad Placement", template: "https://docs.google.com/spreadsheets/d/14YBUdbfLuF5CjP8guAl1S7lFPSXtw1cgWX2p7gfNcsU/edit?usp=sharing", sop: "https://docs.google.com/document/d/1Po1cQaY7HhYHmzvGma79yfnKxpZMCtnYX-LNocFU9s8/edit?tab=t.0#heading=h.s2ar684ljiuh" },
+      { name: "Keyword Research", template: "https://docs.google.com/spreadsheets/d/1Hd2N9pIR0P_DaXERg2ZSdYAxLraSEWN1P2NEJfwgw54/edit?usp=sharing", sop: "https://docs.google.com/document/d/1uadvSvQcz5VoMZhilbVnRo2oYnPEjXidEnl7JNkYm6U/edit?tab=t.0#heading=h.4qvgc0tb3mmu" },
+      { name: "Amazon Keyword & Competitors Research", template: "https://docs.google.com/spreadsheets/d/1BAEcVMBCpohynSa2R1oWPTPVcpHqeZv-mTXTSLqvB50/edit?usp=sharing", sop: "https://docs.google.com/document/d/1ULr0aFvwr4pQVcVrMqR-RmI1wr8mMyBej1FULBnrKQ4/edit?tab=t.0#heading=h.yhrj3gjwdqxb" },
+      { name: "R&D", template: "https://docs.google.com/spreadsheets/d/1tgkaXDLqTV3yDKRtoIlvJHbWPNKyU-FZPeXBxSPkX18/edit?usp=sharing", sop: "https://gamma.app/docs/GNO-Product-RD-Guide-bxbkjl8qu7wgvw4?mode=doc" },
+      { name: "KWs Research Sleeping Relaunch", template: "https://docs.google.com/spreadsheets/d/1aSsPvA4sVdvTFQ_KaMFPljj8YGDev0uvF8-x_DyK0-8/edit?usp=sharing", sop: "https://docs.google.com/document/d/1vrky15vEILaw09SL_f566VTvs2nVIL1MGV8tnJ--Uow/edit?tab=t.0" }
+    ];
+
+    const container = document.getElementById("templatesContainer");
+    items.forEach(item => {
+      const card = document.createElement("div");
+      card.className = "item-card";
+
+      const title = document.createElement("div");
+      title.className = "item-title";
+      title.innerText = item.name;
+
+      const templateBtn = document.createElement("button");
+      templateBtn.className = "small-btn creation";
+      templateBtn.innerText = "Template";
+      templateBtn.onclick = () => window.open(item.template, "_blank");
+
+      const sopBtn = document.createElement("button");
+      sopBtn.className = "small-btn";
+      sopBtn.style.background = "#fdfd96"; 
+      sopBtn.innerText = "SOP";
+      sopBtn.onclick = () => window.open(item.sop, "_blank");
+
+      card.appendChild(title);
+      card.appendChild(templateBtn);
+      card.appendChild(sopBtn);
+      container.appendChild(card);
+    });
+
+    // Date Range Calculator
+    function formatDate(date) {
+      let day = String(date.getDate()).padStart(2, '0');
+      let month = String(date.getMonth() + 1).padStart(2, '0');
+      let year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    function parseManualDate(input) {
+      let parts = input.split('/');
+      if (parts.length !== 3) return null;
+      let day = parseInt(parts[0], 10);
+      let month = parseInt(parts[1], 10) - 1;
+      let year = parseInt(parts[2], 10);
+      return new Date(year, month, day);
+    }
+
+    function calculateRanges(baseDate) {
+      let results = {};
+      let excludeDays = 2;
+      let endDate = new Date(baseDate);
+      endDate.setDate(endDate.getDate() - (excludeDays + 1));
+
+      let start60 = new Date(endDate);
+      start60.setDate(start60.getDate() - 59);
+
+      let start30 = new Date(endDate);
+      start30.setDate(start30.getDate() - 29);
+
+      let start7 = new Date(endDate);
+      start7.setDate(start7.getDate() - 6);
+
+      results["60_days"] = `${formatDate(start60)} → ${formatDate(endDate)}`;
+      results["30_days"] = `${formatDate(start30)} → ${formatDate(endDate)}`;
+      results["7_days"]  = `${formatDate(start7)} → ${formatDate(endDate)}`;
+      return results;
+    }
+
+    function calculateWeeks(baseDate) {
+      let weeks = [];
+      let endDate = new Date(baseDate);
+      endDate.setDate(endDate.getDate() - 1);
+
+      for (let i = 0; i < 4; i++) {
+        let weekEnd = new Date(endDate);
+        weekEnd.setDate(weekEnd.getDate() - (7 * i));
+        let weekStart = new Date(weekEnd);
+        weekStart.setDate(weekStart.getDate() - 6);
+        weeks.push(`${formatDate(weekStart)} → ${formatDate(weekEnd)}`);
+      }
+      return weeks.reverse();
+    }
+
+    function displayAuto() {
+      let today = new Date();
+      let auto = calculateRanges(today);
+      document.getElementById("autoResults").innerHTML = `
+        <div class="result">
+          <b>Previous 60 Days:</b> ${auto["60_days"]}<br>
+          <b>Previous 30 Days:</b> ${auto["30_days"]}<br>
+          <b>Previous 7 Days:</b> ${auto["7_days"]}
+        </div>
+      `;
+    }
+
+    function calculateManual() {
+      let manualDateInput = document.getElementById("manualDate").value;
+      let baseDate = parseManualDate(manualDateInput);
+      if (!baseDate || isNaN(baseDate.getTime())) {
+        alert("Please enter a valid date in DD/MM/YYYY format.");
+        return;
+      }
+      let manual = calculateRanges(baseDate);
+      document.getElementById("manualResults").innerHTML = `
+        <b>Previous 60 Days:</b> ${manual["60_days"]}<br>
+        <b>Previous 30 Days:</b> ${manual["30_days"]}<br>
+        <b>Previous 7 Days:</b> ${manual["7_days"]}
+      `;
+    }
+
+    function displayWeeks() {
+      let today = new Date();
+      let weeks = calculateWeeks(today);
+      document.getElementById("weeksResults").innerHTML = weeks.map((w, i) => `<b>Week ${i+1}:</b> ${w}`).join("<br>");
+    }
+
+    displayAuto();
+    displayWeeks();
+  </script>
+</body>
+</html>

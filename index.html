@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KTG Toolkit </title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#111829; --panel-2:#0f1626;
+      --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --accent-2:#5a82ff; 
+      --ok:#2ecc71; --warn:#ffb020; --border:rgba(255,255,255,.08);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans";
+      background: var(--bg);
+      color: var(--ink);
+      overflow:hidden;
+    }
+
+    /* Layout */
+    .app{ display:grid; grid-template-columns: 280px 1fr; height:100%; }
+    .sidebar{
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border-right:1px solid var(--border);
+      padding:18px 14px;
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px; padding:6px 10px; margin-bottom:12px;
+    }
+    .brand h1{ font-size:18px; margin:0; letter-spacing:.3px; }
+    .badge{ font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+
+    .nav{
+      display:flex; flex-direction:column; gap:8px; margin-top:16px;
+    }
+    .nav a{
+      display:flex; align-items:center; gap:10px;
+      text-decoration:none; color:var(--ink);
+      background: var(--panel-2);
+      padding:10px 12px; border-radius:12px; border:1px solid var(--border);
+      font-weight:600;
+      transition: transform .06s ease, border-color .12s ease, box-shadow .12s ease;
+    }
+    .nav a:hover{ transform: translateY(-1px); border-color:rgba(122,162,255,.55); box-shadow:0 4px 18px rgba(0,0,0,.25); }
+    .nav a.active{ outline:2px solid rgba(122,162,255,.35); }
+    .nav small{ color:var(--muted); font-weight:500; }
+
+    .spacer{ height:10px; }
+    .section-label{ color:var(--muted); font-size:12px; letter-spacing:.4px; margin:12px 6px 6px; }
+
+    .main{
+      display:grid; grid-template-rows: 56px 1fr;
+      height:100%;
+    }
+    .toolbar{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 14px; border-bottom:1px solid var(--border); background:rgba(0,0,0,.15);
+      backdrop-filter: blur(8px);
+    }
+    .toolbar .title{ font-size:16px; font-weight:700; }
+    .toolbar .controls{ display:flex; gap:8px; align-items:center; }
+    .pill{ display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#0f1626; border:1px solid var(--border); color:var(--muted); }
+
+    .content{ height:100%; }
+    iframe#frame{
+      width:100%; height:100%; border:0; background:#0f1626;
+    }
+
+    /* Mobile */
+    @media (max-width: 900px){
+      .app{ grid-template-columns: 1fr; }
+      .sidebar{ position: fixed; inset:0 auto 0 0; width: 82%; max-width: 320px; transform: translateX(-100%); transition: transform .2s ease; z-index: 50; }
+      .sidebar.open{ transform: translateX(0); }
+      .main{ grid-template-rows: 56px 1fr; }
+    }
+
+    button.btn{
+      cursor:pointer; border:none; border-radius:10px; padding:10px 12px; font-weight:700; color:#0b1220;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    }
+    button.btn.secondary{ background:#18223a; color:var(--ink); border:1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 12h7l-2 9L21 3h-7l2-9L3 12z" fill="url(#g)"/><defs><linearGradient id="g" x1="0" y1="0" x2="24" y2="24"><stop stop-color="#7aa2ff"/><stop offset=".7" stop-color="#5a82ff"/></linearGradient></defs></svg>
+        <h1>KTG Toolkit</h1>
+      </div>
+
+      <div class="section-label">Home</div>
+      <nav class="nav" id="nav">
+        <a href="#home" data-src="index1.html"><span>🏠</span> Home</a>
+      </nav>
+
+      <div class="section-label">Reports</div>
+      <nav class="nav">
+        <a href="#bidding" data-src="Bidding.html"><span>📈</span> Bidding</a>
+        <a href="#placement" data-src="Placement.html"><span>📌</span> Placement</a>
+      </nav>
+
+      <div class="section-label">Bleeders</div>
+      <nav class="nav">
+        <a href="#bleeder1" data-src="Bleeder%201.0.html"><span>🩸</span> Bleeder 1.0</a>
+        <a href="#bleeder2" data-src="Bleeder%202.0.html"><span>🩸</span> Bleeder 2.0</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="toolbar">
+        <div class="title" id="title">Home</div>
+        <div class="controls">
+          <button class="btn" id="openTab">Open in New Tab</button>
+        </div>
+      </div>
+      <div class="content">
+        <iframe id="frame" src="index1.html" allow="clipboard-read; clipboard-write"></iframe>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const sidebar = document.getElementById('sidebar');
+    const navLinks = document.querySelectorAll('a[data-src]');
+    const frame = document.getElementById('frame');
+    const titleEl = document.getElementById('title');
+    const statusPill = document.getElementById('statusPill');
+    const openBtn = document.getElementById('openTab');
+    const toggleBtn = document.getElementById('toggleBtn');
+
+    // route map (hash -> [title, src])
+    const routes = {
+      home: { title: 'Home', src: 'index1.html' },
+      bidding: { title: 'Bidding', src: 'Bidding.html' },
+      placement: { title: 'Placement', src: 'Placement.html' },
+      bleeder1: { title: 'Bleeder 1.0', src: 'Bleeder%201.0.html' },
+      bleeder2: { title: 'Bleeder 2.0', src: 'Bleeder%202.0.html' }
+    };
+
+    function setActive(hash){
+      navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + hash));
+    }
+
+    function load(hash){
+      const key = hash || 'home';
+      const r = routes[key] || routes['home'];
+      frame.src = r.src;
+      titleEl.textContent = r.title;
+      openBtn.onclick = () => window.open(r.src, '_blank');
+      setActive(key);
+      // close sidebar on mobile
+      if (window.innerWidth <= 900) sidebar.classList.remove('open');
+    }
+
+    // initial route
+    load((location.hash||'#home').replace('#',''));
+
+    window.addEventListener('hashchange', () => load(location.hash.replace('#','')));
+
+    frame.addEventListener('load', () => {
+      statusPill.textContent = 'Loaded';
+      statusPill.style.color = '#9fb0d3';
+    });
+
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+    });
+  </script>
+</body>
+</html>

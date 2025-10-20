@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Amazon Placement Report Creation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Inter font like the first file -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* === Theme (from Bleeders) === */
+  :root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  /* Layout + card */
+  .wrap{ max-width:980px; margin:40px auto; padding:24px; }
+  .card{
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  }
+
+  h1{ font-size:28px; margin:0 0 12px; }
+  h3{ margin:22px 0 10px; }
+  .help, .note{ color:var(--muted); margin:6px 0 16px; }
+  .small{ font-size:12px; color:var(--muted); }
+
+  /* Inputs & buttons */
+  label{ display:block; font-weight:600; margin:12px 0 6px; }
+  input[type="file"], select, button, textarea{
+    width:100%;
+    padding:12px 14px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,0.12);
+    background:#0f1626;
+    color:var(--ink);
+    outline:none;
+  }
+  textarea{ resize:vertical; min-height:180px; }
+
+  input[type="file"]:focus, select:focus, button:focus, textarea:focus{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(122,162,255,0.25);
+  }
+
+  .btn{ cursor:pointer; font-weight:700; letter-spacing:.2px; border:none; }
+  .btn.primary{ background: linear-gradient(90deg, #5a82ff, #7aa2ff); }
+  .btn.secondary{ background:#18223a; font-weight:600; }
+
+  /* Grid rows */
+  .row{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .mt{ margin-top:14px; }
+
+  /* Status */
+  .status{ display:flex; gap:10px; align-items:center; color:var(--muted); }
+  .dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
+  .dot.ok{ background: var(--ok); }
+
+  /* Table (dark) */
+  table{ width:100%; border-collapse:collapse; margin-top:8px; background:#0f1626; border-radius:12px; overflow:hidden; }
+  th,td{ border:1px solid rgba(255,255,255,0.08); padding:8px 10px; }
+  th{ background:#121a2b; text-align:left; }
+
+  /* Footer */
+  footer{ margin-top:24px; color:var(--muted); font-size:12px; text-align:center; }
+  code { background:#0f1626; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>📊 Amazon Placement Report Creator</h1>
+    <p class="help">Upload all Excel files at once. Then assign each file to its role. Click <strong>Proceed</strong> to export <code>placement.xlsx</code>.</p>
+
+    <div>
+      <label>Upload all Excel files</label>
+      <input id="allFiles" type="file" accept=".xlsx,.xls" multiple />
+    </div>
+
+    <div id="fileAssignments" class="row mt"></div>
+
+    <div class="row mt">
+      <div>
+        <button id="proceed" class="btn primary">Proceed</button>
+      </div>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="status"></span>
+      </div>
+    </div>
+
+    <h3 class="mt">Log data</h3>
+    <textarea id="log" readonly></textarea>
+
+    <!-- Optional table placeholder if you later want to preview rows -->
+    <!-- <table class="mt"><thead><tr><th>Header</th></tr></thead><tbody></tbody></table> -->
+  </div>
+
+  <footer class="small">
+  </footer>
+</div>
+
+<script>
+function log(s){const t=document.getElementById('log');t.value=(new Date()).toISOString()+' | '+s+'\n'+t.value;}
+
+/* Status helpers to mimic Bleeders UX */
+function setStatus(text, ok=false){
+  const s=document.getElementById('status');
+  const d=document.getElementById('statusDot');
+  s.textContent=text||'';
+  if(ok){ d.classList.add('ok'); } else { d.classList.remove('ok'); }
+}
+
+/* read file */
+function readFileAsync(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>resolve({name:file.name,data:e.target.result});
+    reader.onerror=e=>reject(e);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function findSheetByName(wsNames,candidates){
+  candidates=candidates.map(x=>x.toLowerCase());
+  for(const n of wsNames){if(candidates.includes(n.toLowerCase())) return n;}
+  return wsNames[0];
+}
+
+function getValueFromRow(row,headerCandidates){
+  for(const h of headerCandidates){if(h in row) return row[h];}
+  const keys=Object.keys(row);
+  const lowerMap={}; for(const k of keys){lowerMap[k.toLowerCase()]=k;}
+  for(const h of headerCandidates){
+    const lk=h.toLowerCase();
+    if(lk in lowerMap) return row[lowerMap[lk]];
+  }
+  for(const h of headerCandidates){
+    for(const k of keys){if(k.toLowerCase().includes(h.toLowerCase().replace(/[^a-z0-9 ]/g,''))) return row[k];}
+  }
+  return undefined;
+}
+
+function pickColumns(rows,mapping){
+  return rows.map(r=>{
+    const o={};
+    for(const out of Object.keys(mapping)){
+      o[out]=getValueFromRow(r,mapping[out]);
+    }
+    return o;
+  });
+}
+
+/* Robust ACOS parser */
+function parseACOStoDecimal(v){
+  if(v===undefined || v===null || v==='') return 0;
+  if(typeof v === 'number'){
+    if(!isFinite(v)) return 0;
+    return Math.abs(v) > 1 ? v/100 : v;
+  }
+  const s = String(v).trim();
+  if(s === '') return 0;
+  if(s.includes('%')){
+    const num = parseFloat(s.replace(/[^0-9.\-eE]/g,''));
+    return isNaN(num) ? 0 : num/100;
+  }
+  const num = parseFloat(s.replace(/[^0-9.\-eE]/g,''));
+  if(isNaN(num)) return 0;
+  return Math.abs(num) > 1 ? num/100 : num;
+}
+
+/* ---- File assignment UI ---- */
+document.getElementById('allFiles').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  const roles = ['Bulk 30d','Bulk 7d','30d campaigns','7d campaigns','Day Before Yesterday','Yesterday'];
+  const container = document.getElementById('fileAssignments');
+  container.innerHTML = '';
+
+  roles.forEach(role => {
+    const select = document.createElement('select');
+    select.dataset.role = role;
+
+    const isMultiple = ['30d campaigns','7d campaigns','Day Before Yesterday','Yesterday'].includes(role);
+    if(isMultiple) select.multiple = true;
+
+    select.innerHTML = Array.from(files).map((f,i)=>`<option value="${i}">${f.name}</option>`).join('');
+
+    const label = document.createElement('label');
+    label.textContent = role;
+    label.appendChild(select);
+
+    if(isMultiple){
+      const countSpan = document.createElement('span');
+      countSpan.style.marginLeft = '6px';
+      countSpan.style.fontWeight = 'normal';
+      countSpan.className = 'small';
+      countSpan.textContent = '(0 selected)';
+      label.appendChild(countSpan);
+
+      select.addEventListener('change', () => {
+        const selectedCount = select.selectedOptions.length;
+        countSpan.textContent = `(${selectedCount} selected)`;
+        updateDropdowns();
+      });
+    } else {
+      select.addEventListener('change', updateDropdowns);
+    }
+
+    container.appendChild(label);
+  });
+
+  function updateDropdowns(){
+    const allSelects = container.querySelectorAll('select');
+    const selectedIndices = [];
+    allSelects.forEach(s => {
+      if(!s.multiple && s.value!=='') selectedIndices.push(s.value);
+      if(s.multiple) selectedIndices.push(...Array.from(s.selectedOptions).map(o=>o.value));
+    });
+
+    allSelects.forEach(s=>{
+      const currentValues = s.multiple ? Array.from(s.selectedOptions).map(o=>o.value) : [s.value];
+      Array.from(s.options).forEach(opt=>{
+        if(opt.value==='') return;
+        if(s.multiple){
+          opt.disabled = !currentValues.includes(opt.value) && selectedIndices.includes(opt.value);
+        } else {
+          opt.disabled = opt.value !== s.value && selectedIndices.includes(opt.value);
+        }
+      });
+    });
+  }
+});
+
+/* ---- Main processing function ---- */
+async function proceed(){
+  setStatus('Working...');
+  log('Start processing');
+  try{
+    const selects = document.querySelectorAll('#fileAssignments select');
+    const allFiles = document.getElementById('allFiles').files;
+    const inputs = {};
+    selects.forEach(sel => {
+      const idxs = sel.multiple ? Array.from(sel.selectedOptions).map(o=>o.value) : [sel.value];
+      if(idxs.length>0 && idxs[0]!=='') inputs[sel.dataset.role.replace(/\s+/g,'')] = idxs.map(i=>allFiles[i]);
+    });
+
+    const readPromises = Object.entries(inputs).flatMap(([k,v])=>{
+      return v.map(file=>readFileAsync(file).then(data=>({key:k,file:data})));
+    });
+    const files = await Promise.all(readPromises);
+    log('Files loaded: '+files.map(f=>f.key).join(', '));
+
+    const workbooks={};
+    for(const f of files){
+      const wb=XLSX.read(f.file.data,{type:'array'});
+      if(workbooks[f.key]) workbooks[f.key].push(wb);
+      else workbooks[f.key] = ['30dcampaigns','7dcampaigns','DayBeforeYesterday','Yesterday'].includes(f.key) ? [wb] : wb;
+      log('Parsed: '+f.key+' sheets: '+wb.SheetNames.join(', '));
+    }
+
+    // ---------- Stage 1 -> USA ----------
+    let usaRows=[];
+    if(workbooks.Bulk30d){
+      const wb=workbooks.Bulk30d;
+      const sheetName=findSheetByName(wb.SheetNames,['Sponsored Products Campaigns','Sponsored Products - Campaigns','Sponsored Products']);
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
+      log('Bulk30d raw rows: '+rows.length+' (sheet: '+sheetName+')');
+
+      const filtered=rows.filter(r=>{
+        const placement=getValueFromRow(r,['Placement']);
+        const state=getValueFromRow(r,['Campaign State (Informational only)','Campaign State (Informational Only)','Campaign State']);
+        return placement!==undefined&&String(placement).trim()!==''&&!(state!==undefined && String(state).toLowerCase().includes('paused'));
+      });
+      log('Bulk30d after filter: '+filtered.length);
+
+      const mapping={
+        'Campaign Name (Informational only)':['Campaign Name (Informational only)','Campaign Name','Campaigns','Campaign'],
+        'Clicks':['Clicks','Clicks (All)','clicks'],
+        'Spend':['Spend','Spend (USD)','Total Spend','amount'],
+        'Orders':['Orders','Total Orders','ordered units','Units Ordered'],
+        'ACOS':['ACOS','Acos','ACoS'],
+        'Placement':['Placement','placement'],
+        'Percentage':['Percentage','%','Share (%)','Percentage (of something)']
+      };
+
+      usaRows = pickColumns(filtered,mapping).map(r=>({
+        'Campaign Name (Informational only)': r['Campaign Name (Informational only)'] || '',
+        'Portfolio': '',
+        'Budget': '',
+        'Clicks': r['Clicks']!==undefined && r['Clicks']!=='' ? r['Clicks'] : 0,
+        'Spend': r['Spend']!==undefined && r['Spend']!=='' ? r['Spend'] : 0,
+        'Orders': r['Orders']!==undefined && r['Orders']!=='' ? r['Orders'] : 0,
+        'CVR': '',
+        'ACOS': parseACOStoDecimal(r['ACOS']),
+        'total Clicks': '',
+        'total Spend': '',
+        'total Orders': '',
+        'total CVR': '',
+        'total ACoS': '',
+        'Spent DB Yesterday': '',
+        'Spent Yesterday': '',
+        'Budget Check': '',
+        'Last 30 days': '',
+        'Last 7 days': '',
+        'Yesterday': '',
+        'Placement': r['Placement'] || '',
+        'Percentage': r['Percentage']!==undefined && r['Percentage']!=='' ? r['Percentage'] : 0
+      }));
+      log('USA rows mapped with reserved columns: '+usaRows.length);
+    } else { log('Bulk30d file not provided'); }
+
+    // ---------- Stage 2 -> data update ----------
+    function mergeRows(keys){
+      let merged=[];
+      keys.forEach(k=>{
+        if(!workbooks[k]) return;
+        const wbs = Array.isArray(workbooks[k]) ? workbooks[k] : [workbooks[k]];
+        for(const wb of wbs){
+          const sheetName=findSheetByName(wb.SheetNames,['Sponsored Products Campaigns','Sponsored Products - Campaigns','Sponsored Products','Campaigns','Sheet1']);
+          const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
+          merged.push(...rows);
+          log(k+' file rows: '+rows.length+' (sheet: '+sheetName+')');
+        }
+      });
+      return merged;
+    }
+
+    const rowsBulk7 = mergeRows(['Bulk7d']).filter(r=>{
+      const placement = getValueFromRow(r,['Placement']);
+      const state = getValueFromRow(r,['Campaign State (Informational only)','Campaign State']);
+      return placement !== undefined && String(placement).trim() !== '' && !(state !== undefined && String(state).toLowerCase().includes('paused'));
+    });
+    log('Bulk7d filtered rows: '+rowsBulk7.length);
+
+    const rowsDayBefore = mergeRows(['DayBeforeYesterday']);
+    const rowsYesterday = mergeRows(['Yesterday']);
+
+    const maxRows = Math.max(rowsBulk7.length, rowsDayBefore.length, rowsYesterday.length);
+    const dataUpdateRows = [];
+
+    const mappingBulk7 = {
+      'Campaign Name_bulk7':['Campaign Name (Informational only)','Campaign Name','Campaigns','Campaign'],
+      'Placement':['Placement','placement'],
+      'Clicks':['Clicks','clicks'],
+      'Spend_bulk7':['Spend','Spend (USD)','Total Spend'],
+      'Orders':['Orders','Orders (All)','ordered units'],
+      'ACOS':['ACOS','Acos','ACoS']
+    };
+    const mappingDayBefore = {
+      'Campaign Name_dayBefore':['Campaigns','Campaign Name','Campaign Name (Informational only)','Campaign'],
+      'Portfolio_dayBefore':['Portfolio','Portfolio name','Portfolio Name'],
+      'Spend_dayBefore':['Spend','Spend (USD)','Total Spend'],
+      'Budget_dayBefore':['Budget','Daily Budget','Budget (USD)']
+    };
+    const mappingYesterday = {
+      'Campaign Name_yesterday':['Campaigns','Campaign Name','Campaign Name (Informational only)','Campaign'],
+      'Spend_yesterday':['Spend','Spend (USD)','Total Spend']
+    };
+
+    for(let i=0;i<maxRows;i++){
+      const row={};
+
+      // Bulk7
+      if(rowsBulk7[i]) Object.assign(row,pickColumns([rowsBulk7[i]],mappingBulk7)[0]);
+      else Object.keys(mappingBulk7).forEach(k=>row[k]='');
+
+      // DayBeforeYesterday with Budget before Spend
+      if(rowsDayBefore[i]){
+        let dayBeforeRow = pickColumns([rowsDayBefore[i]], mappingDayBefore)[0];
+        row['Campaign Name_dayBefore'] = dayBeforeRow['Campaign Name_dayBefore'] || '';
+        row['Portfolio_dayBefore'] = dayBeforeRow['Portfolio_dayBefore'] || '';
+        row['Budget_dayBefore'] = dayBeforeRow['Budget_dayBefore'] || '';
+        row['Spend_dayBefore'] = (dayBeforeRow['Spend_dayBefore'] !== undefined && dayBeforeRow['Spend_dayBefore'] !== '') ? dayBeforeRow['Spend_dayBefore'] : 0;
+      } else {
+        Object.keys(mappingDayBefore).forEach(k=>row[k]='');
+      }
+
+      // Yesterday
+      if(rowsYesterday[i]) Object.assign(row,pickColumns([rowsYesterday[i]],mappingYesterday)[0]);
+      else Object.keys(mappingYesterday).forEach(k=>row[k]='');
+
+      if('ACOS' in row){
+        row['ACOS'] = parseACOStoDecimal(row['ACOS']);
+      }
+
+      dataUpdateRows.push(row);
+    }
+    log('data update total rows: '+dataUpdateRows.length);
+
+    // ---------- Stage 3 -> TOS ----------
+    const tosSources=[{key:'30dcampaigns',name:'30d'},{key:'7dcampaigns',name:'7d'},{key:'Yesterday',name:'yesterday'}];
+    let tosWideRows=[];
+    let maxTosRows=0;
+    let tosData={};
+
+    for(const s of tosSources){
+      tosData[s.name]=[];
+      const wbs = workbooks[s.key];
+      if(!wbs){log(s.name+' not provided'); continue;}
+      const wbArray = Array.isArray(wbs) ? wbs : [wbs];
+      let mergedRows=[];
+      for(const wb of wbArray){
+        const sheetName=findSheetByName(wb.SheetNames,['Campaigns','Sponsored Products Campaigns','Sheet1']);
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
+        mergedRows.push(...rows);
+        log(s.name+' file rows: '+rows.length+' (sheet: '+sheetName+')');
+      }
+      const mapping={'Campaigns':['Campaigns','Campaign Name','Campaign Name (Informational only)','Campaign'],'Top-of-search impression share':['Top-of-search impression share','Top of search impression share','Top-of-search impression share %','Top of search impression share (TOS)']};
+      tosData[s.name]=pickColumns(mergedRows,mapping);
+      if(tosData[s.name].length>maxTosRows) maxTosRows=tosData[s.name].length;
+      log(s.name+' merged & mapped rows: '+tosData[s.name].length);
+    }
+
+    for(let i=0;i<maxTosRows;i++){
+      const row={};
+      for(let j=0;j<tosSources.length;j++){
+        const s = tosSources[j];
+        const r = tosData[s.name][i] || {};
+        row['Campaigns_'+s.name] = r['Campaigns'] || '';
+        row[s.name+' TOS'] = r['Top-of-search impression share']!==undefined && r['Top-of-search impression share']!=='' ? r['Top-of-search impression share'] : 0;
+
+        if(s.name === '30d' || s.name === '7d'){
+          row['Separator_after_'+s.name] = '';
+        }
+      }
+      tosWideRows.push(row);
+    }
+    log('TOS wide total rows: '+tosWideRows.length);
+
+    // ---------- Build output workbook ----------
+    const outWb=XLSX.utils.book_new();
+
+    function appendSheetWithACOSFormatting(jsonRows, sheetName){
+      if(!jsonRows || jsonRows.length===0) return;
+      const ws = XLSX.utils.json_to_sheet(jsonRows, {skipHeader:false});
+      const headers = Object.keys(jsonRows[0]);
+      const acosIndex = headers.findIndex(h => h.toLowerCase().replace(/\s+/g,'') === 'acos' || h.toLowerCase().includes('acos'));
+      if(acosIndex !== -1){
+        const colLetter = XLSX.utils.encode_col(acosIndex);
+        for(let r=0;r<jsonRows.length;r++){
+          const addr = colLetter + (r + 2);
+          const val = (jsonRows[r][headers[acosIndex]] === undefined || jsonRows[r][headers[acosIndex]] === '') ? 0 : jsonRows[r][headers[acosIndex]];
+          const dec = parseACOStoDecimal(val);
+          ws[addr] = { t: 'n', v: dec, z: '0.00%' };
+        }
+      }
+      XLSX.utils.book_append_sheet(outWb, ws, sheetName);
+      log(sheetName+' sheet appended: '+jsonRows.length);
+    }
+
+    if(usaRows.length>0){ appendSheetWithACOSFormatting(usaRows,'USA'); }
+    if(dataUpdateRows.length>0){ appendSheetWithACOSFormatting(dataUpdateRows,'data update'); }
+    if(tosWideRows.length>0){
+      const ws = XLSX.utils.json_to_sheet(tosWideRows);
+      XLSX.utils.book_append_sheet(outWb, ws, 'TOS');
+      log('TOS sheet appended: '+tosWideRows.length);
+    }
+
+    XLSX.writeFile(outWb,'placement.xlsx');
+    log('Exported: placement.xlsx');
+    setStatus('Done — file downloaded', true);
+
+  }catch(err){
+    console.error(err);
+    log('Error: '+(err && err.message?err.message:err));
+    setStatus('Error');
+  }
+}
+document.getElementById('proceed').addEventListener('click',proceed);
+</script>
+</body>
+</html>

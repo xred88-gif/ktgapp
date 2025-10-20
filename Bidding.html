@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bidding</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Inter font like the first file -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* === Theme variables & base (copied/adapted from first file) === */
+  :root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  /* === Layout & card === */
+  .wrap{ max-width: 980px; margin: 40px auto; padding: 24px; }
+  .card{
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  }
+
+  h1{ font-size:28px; margin:0 0 12px; }
+  h3{ margin:22px 0 10px; }
+
+  /* === Text / notes === */
+  .help{ color: var(--muted); margin: 6px 0 16px; }
+  .small{ font-size:12px; color: var(--muted); }
+
+  /* === Form === */
+  label{ display:block; font-weight:600; margin:12px 0 6px; }
+  input[type="file"], select, button, textarea{
+    width:100%;
+    padding:12px 14px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,0.12);
+    background:#0f1626;
+    color:var(--ink);
+    outline:none;
+  }
+  textarea{ resize:vertical; min-height:180px; }
+
+  input[type="file"]:focus,
+  select:focus,
+  button:focus,
+  textarea:focus{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(122,162,255,0.25);
+  }
+
+  /* Buttons: primary + subtle secondary */
+  .btn{ cursor:pointer; font-weight:700; letter-spacing:.2px; border:none; }
+  .btn.primary{ background: linear-gradient(90deg, #5a82ff, #7aa2ff); }
+  .btn.secondary{ background:#18223a; font-weight:600; }
+
+  /* Grid rows */
+  .row{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .mt{ margin-top:14px; }
+
+  /* Status (optional dot like first file) */
+  .status{ display:flex; gap:10px; align-items:center; margin-top:12px; color:var(--muted); }
+  .dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
+  .dot.ok{ background: var(--ok); }
+
+  /* Footer (optional) */
+  footer{ margin-top:24px; color:var(--muted); font-size:12px; text-align:center; }
+  code { background:#0f1626; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="card">
+    <h1>📊 Amazon Bidding Report Creator</h1>
+    <p class="help">Upload all Excel files at once. Assign each file to a role and click <strong>Proceed</strong> to produce <code>bidding.xlsx</code>.</p>
+
+    <div class="mt">
+      <label>Upload all Excel files</label>
+      <input id="allFiles" type="file" accept=".xlsx,.xls" multiple />
+    </div>
+
+    <div id="fileAssignments" class="row mt"></div>
+
+    <div class="row mt">
+      <div>
+        <button id="proceed" class="btn primary">Proceed</button>
+      </div>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="status"> </span>
+      </div>
+    </div>
+
+    <h3 class="mt">Log data</h3>
+    <textarea id="log" readonly></textarea>
+  </div>
+
+  <footer class="small">
+  </footer>
+</div>
+
+<script>
+// ---- Main processing ----
+async function proceed(){
+  setStatus('Working...');
+  log('Start processing');
+  try{
+    const selects=document.querySelectorAll('#fileAssignments select');
+    const allFiles=document.getElementById('allFiles').files;
+    const filesMap={};
+
+    selects.forEach(sel=>{
+      const idxs=Array.from(sel.selectedOptions).map(o=>o.value);
+      if(idxs.length>0) filesMap[sel.dataset.role]=idxs.map(i=>allFiles[i]);
+    });
+
+    if(!filesMap['Campaigns 30 Days'] || filesMap['Campaigns 30 Days'].length===0)
+      throw new Error('Campaigns 30 Days not assigned.');
+
+    log('Files assigned');
+
+    // ✅ fixed: use wb everywhere (lowercase b) + a bit more resilience
+    async function readMultiple(files){
+      const allData=[];
+      for(const f of (files||[])){
+        try{
+          const { data, name } = await readFileAsync(f);
+          const wb = XLSX.read(data, { type:'array' });
+          const firstSheet = wb.SheetNames[0];
+          const sheet = wb.Sheets[firstSheet];
+          const json = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+          allData.push(...json);
+        }catch(e){
+          log(`Failed to read ${f && f.name ? f.name : '(unknown)'}: ${e.message||e}`);
+        }
+      }
+      return allData;
+    }
+
+    const data30 = await readMultiple(filesMap['Campaigns 30 Days']);
+    const data7  = await readMultiple(filesMap['Campaigns 7 Days']||[]);
+    const dayBefore = await readMultiple(filesMap['Day Before Yesterday']||[]);
+    const yesterday = await readMultiple(filesMap['Yesterday']||[]);
+
+    log('Files loaded');
+
+    const map7={}, mapDB={}, mapY={};
+    data7.forEach(r=>{ map7[r['Campaigns']]=r; });
+    dayBefore.forEach(r=>{ mapDB[r['Campaigns']]=r; });
+    yesterday.forEach(r=>{ mapY[r['Campaigns']]=r; });
+
+    const output=[];
+    data30.forEach((r30)=>{
+      const name=r30['Campaigns'];
+      const r7 = map7[name]||{};
+      const rDB= mapDB[name]||{};
+      const rY = mapY[name]||{};
+
+      output.push({
+        'Campaigns': name||'',
+        'Start date': formatDate(r30['Start date']),
+        'Portfolio': r30['Portfolio']||r30['Portifolio']||'',
+        'Budget': r30['Budget']||0,
+        'Impressions_30days': r30['Impressions']||r30['Impression']||0,
+        'Clicks_30days': r30['Clicks']||0,
+        'Spend_30days': r30['Spend']||0,
+        'Orders_30days': r30['Orders']||0,
+        'Sales_30days': r30['Sales']||0,
+        'ACOS_30days': r30['ACOS'] ? (r30['ACOS'] > 1 ? r30['ACOS']/100 : r30['ACOS']) : 0,
+        'Last 7 Days': '',
+        'Impressions_7days': r7['Impressions']||r7['Impression']||0,
+        'Clicks_7days': r7['Clicks']||0,
+        'Spend_7days': r7['Spend']||0,
+        'Orders_7days': r7['Orders']||0,
+        'Sales_7days': r7['Sales']||0,
+        'ACOS_7days': r7['ACOS'] ? (r7['ACOS'] > 1 ? r7['ACOS']/100 : r7['ACOS']) : 0,
+        'Spent_DayBeforeYesterday': rDB['Spend']||0,
+        'Spent_Yesterday': rY['Spend']||0
+      });
+    });
+
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.json_to_sheet(output);
+
+    const wsRange=XLSX.utils.decode_range(ws['!ref']);
+    const headers = Object.keys(output[0]);
+    const headerMap = {};
+    headers.forEach((h,i)=>headerMap[h]=i);
+
+    const acos30Col = XLSX.utils.encode_col(headerMap['ACOS_30days']);
+    const acos7Col  = XLSX.utils.encode_col(headerMap['ACOS_7days']);
+
+    for(let R=1; R<=wsRange.e.r; R++){
+      ws[acos30Col + (R+1)].t='n';
+      ws[acos30Col + (R+1)].z='0.00%';
+      ws[acos7Col + (R+1)].t='n';
+      ws[acos7Col + (R+1)].z='0.00%';
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Bidding');
+    XLSX.writeFile(wb,'bidding.xlsx');
+    setStatus('Done — bidding.xlsx downloaded', true);
+    log('Export completed');
+
+  }catch(err){
+    console.error(err);
+    log('Error: '+(err.message||err));
+    setStatus('Error');
+  }
+}
+
+document.getElementById('proceed').addEventListener('click',proceed);
+</script>
+
+
+</body>
+</html>

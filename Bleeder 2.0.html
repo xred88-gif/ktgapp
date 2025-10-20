@@ -1,0 +1,314 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bleeders 2.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
+*{ box-sizing: border-box; }
+body{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--ink); }
+.wrap{ max-width: 980px; margin: 40px auto; padding: 24px; }
+.card{ background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+h1{ font-size: 28px; margin: 0 0 16px; }
+p.help{ color: var(--muted); margin-top: 6px; }
+label{ display:block; font-weight:600; margin: 12px 0 6px; }
+input[type="file"], input[type="number"], button{
+  width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background: #0f1626; color: var(--ink); outline: none;
+}
+input[type="file"]:focus, input[type="number"]:focus, button:focus{ border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,162,255,0.25); }
+button{ cursor:pointer; font-weight:700; letter-spacing: .2px; background: linear-gradient(90deg, #5a82ff, #7aa2ff); border: none; }
+button.secondary{ background: #18223a; font-weight:600; }
+.row{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mt{ margin-top: 14px; }
+.small{ font-size: 12px; color: var(--muted); }
+.pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#0f1626; border:1px solid rgba(255,255,255,0.08); }
+.status{ display:flex; gap:10px; align-items:center; margin-top:12px; }
+.dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
+.dot.ok{ background: var(--ok); }
+.hidden{ display:none !important; }
+footer{ margin-top: 24px; color: var(--muted); font-size: 12px; text-align:center; }
+code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>📊 Bleeders 2.0 </h1>
+    <p class="help">Upload your Amazon 60 days bulk file. Choose whether to include Suggestions before exporting.</p>
+
+    <label for="file">Excel file (.xlsx)</label>
+    <input id="file" type="file" accept=".xlsx" />
+
+    <div class="row mt">
+      <div>
+        <label for="orders">Orders must be ≤</label>
+        <input id="orders" type="number" value="5" min="0" step="1" />
+      </div>
+      <div></div>
+    </div>
+
+    <div class="mt">
+      <label>Step 1 ACOS thresholds per sheet (≥)</label>
+      <input id="acos_SP" type="number" value="0.55" min="0" step="0.01" placeholder="SP Search Term Report" class="mt"/>
+      <input id="acos_SPC" type="number" value="0.55" min="0" step="0.01" placeholder="Sponsored Products Campaigns" class="mt"/>
+      <input id="acos_SB" type="number" value="0.45" min="0" step="0.01" placeholder="SB Search Term Report" class="mt"/>
+      <input id="acos_SBC" type="number" value="0.45" min="0" step="0.01" placeholder="Sponsored Brands Campaigns" class="mt"/>
+      <input id="acos_SD" type="number" value="0.45" min="0" step="0.01" placeholder="Sponsored Display Campaigns" class="mt"/>
+    </div>
+
+    <div class="mt">
+      <label>Step 2 ACOS threshold for Suggestions (Universal)</label>
+      <input id="sug_ACOS" type="number" value="0.8" min="0" step="0.01" class="mt"/>
+    </div>
+
+    <div class="mt">
+      <label><input type="checkbox" id="includeSug" checked /> Include Suggestions</label>
+    </div>
+
+    <div class="row mt">
+      <button id="processBtn">⚙️ Process & Export</button>
+    </div>
+
+    <div class="status hidden" id="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Processing…</span>
+    </div>
+
+    <div class="row mt">
+      <button id="downloadBtn" class="hidden">⬇️ Download Excel</button>
+      <button id="resetBtn" class="secondary hidden">Reset</button>
+    </div>
+
+    <p class="help mt small">
+      Sheets processed (always present):
+      <span class="pill">1. SP Search Term Report</span>
+      <span class="pill">2. Sponsored Products Campaigns</span>
+      <span class="pill">3. SB Search Term Report</span>
+      <span class="pill">4. Sponsored Brands Campaigns</span>
+      <span class="pill">5. Sponsored Display Campaigns</span>
+    </p>
+  </div>
+
+  <footer>
+    KTG - 2025 - copyright © 2020 all rights reserved  <code>KTG</code>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+// === Constants ===
+const SHTS = [
+  "SP Search Term Report",
+  "Sponsored Products Campaigns",
+  "SB Search Term Report",
+  "Sponsored Brands Campaigns",
+  "Sponsored Display Campaigns"
+];
+
+const COLS = {
+  "SP Search Term Report": [
+    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term",
+    "Impressions","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","ROAS","Orders"
+  ],
+  "Sponsored Products Campaigns": [
+    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion",
+    "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
+  ],
+  "SB Search Term Report": [
+    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term",
+    "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
+  ],
+  "Sponsored Brands Campaigns": [
+    "Campaign Name (Informational only)","Product Targeting Expression","Match Type","Clicks","Suggestion","CPC","Spend","Sales","ACOS","Orders"
+  ],
+  "Sponsored Display Campaigns": [
+    "Campaign Name (Informational only)",
+    "Ad Group Name (Informational only)",
+    "Targeting Expression",
+    "Clicks",
+    "Suggestion",
+    "Spend",
+    "CPC",
+    "Sales",
+    "ACOS",
+    "Orders"
+  ]
+};
+
+// === Helper Functions ===
+function norm(v){ return v==null?"":String(v).trim(); }
+function lower(v){ return norm(v).toLowerCase(); }
+function isNotPaused(val){ const s=lower(val); return s!=="paused" && s!=="pause" && s!=="stopped" && s!=="disabled" && s!==""; }
+function parseNumber(val){ if(val==null) return NaN; let s=String(val).replace(/\s/g,"").replace("%","").replace(",","."), n=parseFloat(s); return isNaN(n)?NaN:n; }
+function getColFlexible(df, keywords){ const keys=Object.keys(df); for(const key of keys){ const clean=key.replace(/\s|\(|\)|%/g,"").toLowerCase(); for(const kw of keywords){ const ck=kw.replace(/\s|\(|\)|%/g,"").toLowerCase(); if(clean.includes(ck)) return key; } } return null; }
+
+// === Filtering & Suggestions ===
+function filterAndSuggestSheet(name, df, ordersMax, acosMap, sugACOS, withSuggestions){
+  const acosMin=acosMap[name]||0;
+  const out=[];
+  const colState = getColFlexible(df[0]||{}, ["State"]);
+  const colCampState = getColFlexible(df[0]||{}, ["Campaign State"]);
+  const colOrders = getColFlexible(df[0]||{}, ["Orders"]);
+  const colACOS = getColFlexible(df[0]||{}, ["ACOS"]);
+  const colCTR = getColFlexible(df[0]||{}, ["Click-through Rate"]);
+  const colROAS = getColFlexible(df[0]||{}, ["ROAS"]);
+  const colKeyword = getColFlexible(df[0]||{}, ["Keyword Text"]);
+  const colPT = getColFlexible(df[0]||{}, ["Product Targeting Expression","Targeting Expression"]);
+  const colEntity = getColFlexible(df[0]||{}, ["Entity"]);
+  const colAdGroupState = getColFlexible(df[0]||{}, ["Ad Group State"]);
+
+  for(const row of df){
+    // === Sponsored Products Campaigns entity filter ===
+    if(name === "Sponsored Products Campaigns" && colEntity){
+      const entityVal = norm(row[colEntity]).toLowerCase();
+      if(entityVal !== "keyword" && entityVal !== "product targeting") continue;
+    }
+
+    // === Sponsored Display Campaigns entity filter ===
+    if(name === "Sponsored Display Campaigns" && colEntity){
+      const entityVal = norm(row[colEntity]).toLowerCase();
+      if(entityVal === "ad group" || entityVal === "product ad") continue;
+    }
+
+    // === Sponsored Display Campaigns Ad Group State filter ===
+    if(name === "Sponsored Display Campaigns" && colAdGroupState){
+      const agState = norm(row[colAdGroupState]).toLowerCase();
+      if(agState === "" || agState === "paused") continue;
+    }
+
+    // === Orders filter ===
+    const ordersVal = colOrders ? parseNumber(row[colOrders]) : NaN;
+    if(!isNaN(ordersVal) && ordersVal > ordersMax) continue;
+
+    // === ACOS filter ===
+    const acosVal = colACOS ? parseNumber(row[colACOS]) : NaN;
+    if(!isNaN(acosVal) && acosVal < acosMin) continue;
+
+    // === Paused/State filters ===
+    if(colState && !isNotPaused(row[colState])) continue;
+    if(colCampState && !isNotPaused(row[colCampState])) continue;
+    if(name==="SP Search Term Report" && colPT && lower(row["Match Type"])==="exact") continue;
+
+    const r = {...row};
+
+    // Combine Keyword Text + Product Targeting Expression
+    if(colKeyword || colPT){
+      const kw = colKeyword ? norm(row[colKeyword]) : "";
+      const pt = colPT ? norm(row[colPT]) : "";
+      r["Product Targeting Expression"] = kw && pt ? `${kw} | ${pt}` : kw || pt;
+      if(colKeyword) delete r[colKeyword];
+    }
+
+    // Percent formatting
+    if(colCTR && r[colCTR] !== ""){ let num=parseNumber(r[colCTR]); if(!isNaN(num)) r[colCTR] = num.toFixed(2) + "%"; }
+    if(colACOS && r[colACOS] !== ""){ let num=parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%"; }
+    if(colROAS && r[colROAS] !== ""){ let num=parseNumber(r[colROAS]); if(!isNaN(num)) r[colROAS] = (num*100).toFixed(2) + "%"; }
+
+    // Suggestions
+    if(withSuggestions){
+      if(!isNaN(acosVal)){
+        switch(name){
+          case "SP Search Term Report": case "SB Search Term Report": r["Suggestion"] = acosVal >= sugACOS ? "Negative exact" : "Leave"; break;
+          case "Sponsored Products Campaigns": case "Sponsored Display Campaigns": r["Suggestion"] = acosVal >= sugACOS ? "Pause" : "Leave"; break;
+          case "Sponsored Brands Campaigns": r["Suggestion"] = acosVal < sugACOS ? "Pause" : "Leave"; break;
+        }
+      } else r["Suggestion"]="Leave";
+    }
+
+    out.push(r);
+  }
+  return out;
+}
+
+// Convert sheets
+function sheetToJSON(ws){ return XLSX.utils.sheet_to_json(ws,{defval:""}); }
+function aoaToSheet(headers, rows, withSuggestions){
+  const finalHeaders = withSuggestions ? headers : headers.filter(h=>h!=="Suggestion");
+  return XLSX.utils.aoa_to_sheet([finalHeaders, ...rows.map(r=>finalHeaders.map(h=>r[h]??""))]);
+}
+
+// === Status ===
+function setStatus(text, ok=false){ const s=document.getElementById("status"), dot=document.getElementById("statusDot"), t=document.getElementById("statusText"); s.classList.remove("hidden"); t.textContent=text; dot.classList.toggle("ok",ok); }
+
+// === File Handling ===
+const fileEl=document.getElementById("file");
+const ordersEl=document.getElementById("orders");
+const processBtn=document.getElementById("processBtn");
+const downloadBtn=document.getElementById("downloadBtn");
+const resetBtn=document.getElementById("resetBtn");
+let outBlob=null;
+
+async function readFile(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=e=>resolve(XLSX.read(new Uint8Array(e.target.result),{type:'array'})); reader.onerror=reject; reader.readAsArrayBuffer(file); }); }
+
+async function processFile(withSuggestions){
+  const file=fileEl.files[0]; if(!file){alert("Please choose an .xlsx file."); return;}
+  const ordersMax=Number(ordersEl.value||0);
+  const acosMap={
+    "SP Search Term Report": Number(document.getElementById("acos_SP").value),
+    "Sponsored Products Campaigns": Number(document.getElementById("acos_SPC").value),
+    "SB Search Term Report": Number(document.getElementById("acos_SB").value),
+    "Sponsored Brands Campaigns": Number(document.getElementById("acos_SBC").value),
+    "Sponsored Display Campaigns": Number(document.getElementById("acos_SD").value)
+  };
+  const sugACOS=Number(document.getElementById("sug_ACOS").value);
+
+  setStatus("Reading workbook…");
+  let wb; try{wb=await readFile(file);}catch(e){console.error(e); setStatus("Failed to read file.",false); return;}
+  const outWB=XLSX.utils.book_new(); 
+
+  for(const name of SHTS){
+    const ws=wb.Sheets[name]; 
+    const df = ws ? sheetToJSON(ws) : [];
+    setStatus(`Processing: ${name}…`);
+    const rows = filterAndSuggestSheet(name, df, ordersMax, acosMap, sugACOS, withSuggestions);
+    const headers = COLS[name];
+    const sh = aoaToSheet(headers, rows, withSuggestions);
+    XLSX.utils.book_append_sheet(outWB, sh, name.substring(0,31));
+  }
+
+  const outArray=XLSX.write(outWB,{bookType:'xlsx',type:'array'});
+  outBlob=new Blob([outArray],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  downloadBtn.classList.remove("hidden"); resetBtn.classList.remove("hidden");
+  setStatus("✅ Ready. Click download to save your file.",true);
+}
+
+// === Events ===
+processBtn.addEventListener("click", () => {
+  const withSuggestions = document.getElementById("includeSug").checked;
+  processFile(withSuggestions);
+});
+
+downloadBtn.addEventListener("click", () => {
+  if (!outBlob) return;
+  const withSuggestions = document.getElementById("includeSug").checked;
+  const filename = withSuggestions 
+    ? "Bleeders 2.0 Output File with Suggestions.xlsx" 
+    : "Bleeders 2.0 Output File.xlsx";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(outBlob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+});
+
+resetBtn.addEventListener("click",()=>{
+  fileEl.value=''; ordersEl.value=5;
+  document.getElementById("acos_SP").value=0.55;
+  document.getElementById("acos_SPC").value=0.55;
+  document.getElementById("acos_SB").value=0.45;
+  document.getElementById("acos_SBC").value=0.45;
+  document.getElementById("acos_SD").value=0.45;
+  document.getElementById("sug_ACOS").value=0.5;
+  document.getElementById("includeSug").checked = true;
+  outBlob=null;
+  document.getElementById("status").classList.add("hidden");
+  downloadBtn.classList.add("hidden"); resetBtn.classList.add("hidden");
+});
+</script>
+</body>
+</html>

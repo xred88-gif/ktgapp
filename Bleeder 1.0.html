@@ -1,0 +1,260 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bleeders 1.0</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
+    *{ box-sizing: border-box; }
+    body{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--ink); }
+    .wrap{ max-width: 980px; margin: 40px auto; padding: 24px; }
+    .card{ background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+    h1{ font-size: 28px; margin: 0 0 16px; }
+    p.help{ color: var(--muted); margin-top: 6px; }
+    label{ display:block; font-weight:600; margin: 12px 0 6px; }
+    input[type="number"], input[type="file"], select, button{
+      width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background: #0f1626; color: var(--ink); outline: none;
+    }
+    input[type="number"]:focus, input[type="file"]:focus, button:focus{ border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,162,255,0.25); }
+    button{ cursor:pointer; font-weight:700; letter-spacing: .2px; background: linear-gradient(90deg, #5a82ff, #7aa2ff); border: none; }
+    button.secondary{ background: #18223a; font-weight:600; }
+    .row{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .mt{ margin-top: 14px; }
+    .small{ font-size: 12px; color: var(--muted); }
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#0f1626; border:1px solid rgba(255,255,255,0.08); }
+    .status{ display:flex; gap:10px; align-items:center; margin-top:12px; }
+    .dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
+    .dot.ok{ background: var(--ok); }
+    .hidden{ display:none !important; }
+    footer{ margin-top: 24px; color: var(--muted); font-size: 12px; text-align:center; }
+    code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>📊 Bleeders 1.0</h1>
+      <p class="help">Upload your Amazon 60 days bulk file, set the <strong>Clicks &gt;</strong> threshold, and download a new workbook with only the specified tabs and columns with filters applied. After filtering, you can apply suggestions.</p>
+
+      <label for="file">Excel file (.xlsx)</label>
+      <input id="file" type="file" accept=".xlsx" />
+
+      <div class="row mt">
+        <div>
+          <label for="clicks">Step 1: Clicks must be &gt;</label>
+          <input id="clicks" type="number" value="9" min="0" step="1" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="processBtn">⚙️ Process & Filter</button>
+        </div>
+      </div>
+
+      <div class="row mt hidden" id="suggestionRow">
+        <div>
+          <label for="clicksSug">Step 2: Enter clicks threshold for suggestions</label>
+          <input id="clicksSug" type="number" value="14" min="0" step="1" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="applySugBtn">📝 Apply Suggestions</button>
+        </div>
+      </div>
+
+      <div class="status hidden" id="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Processing…</span>
+      </div>
+
+      <div class="row mt">
+        <button id="downloadBtn" class="hidden">⬇️ Download Excel</button>
+        <button id="resetBtn" class="secondary hidden">Reset</button>
+      </div>
+
+      <p class="help mt small">
+        Sheets processed (if present):
+        <span class="pill">1. SP Search Term Report</span>
+        <span class="pill">2. Sponsored Products Campaigns</span>
+        <span class="pill">3. SB Search Term Report</span>
+        <span class="pill">4. Sponsored Brands Campaigns</span>
+        <span class="pill">5. Sponsored Display Campaigns</span>
+      </p>
+    </div>
+
+    <footer>
+      KTG - 2025 - copyright © 2020 all rights reserved <code>KTG</code>
+    </footer>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+  const COLS = {
+    "SP Search Term Report": [
+      "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting","Match Type","Suggestion","Customer Search Term",
+      "Impressions","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","ROAS","Orders"
+    ],
+    "Sponsored Products Campaigns": [
+      "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting","Match Type","Suggestion",
+      "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
+    ],
+    "SB Search Term Report": [
+      "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting","Match Type","Suggestion","Customer Search Term",
+      "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
+    ],
+    "Sponsored Brands Campaigns": [
+      "Campaign Name (Informational only)","Keyword / Product Targeting","Match Type","Clicks","Suggestion","CPC","Spend","Sales","ACOS","Orders"
+    ],
+    "Sponsored Display Campaigns": [
+      "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting",
+      "Clicks","Suggestion","Spend","CPC","Sales","ACOS","Orders"
+    ]
+  };
+
+  const SHTS = Object.keys(COLS);
+  function norm(v){return v==null?"":String(v).trim();}
+  function lower(v){return norm(v).toLowerCase();}
+  function toNumber(v){const s=norm(v).replace(/[^0-9.\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
+  function isNotPaused(v){const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";}
+
+  function combineKeywordAndTarget(row){
+    const keyword = norm(row["Keyword Text"]);
+    const targeting = norm(row["Product Targeting Expression"] || row["Targeting Expression"]);
+    return keyword && targeting ? `${keyword} / ${targeting}` : (keyword || targeting);
+  }
+
+  function filterSheet(sheetName, df, clicksThreshold){
+    const out=[]; if(!df.length) return {rows:[],headers:[]};
+
+    if(sheetName==="Sponsored Products Campaigns"){
+      for(const row of df){
+        const entity=lower(row["Entity"]);
+        const state=lower(row["State"]);
+        const campaignState=lower(row["Campaign State (Informational only)"]);
+        const clicks=toNumber(row["Clicks"]);
+        const sales=toNumber(row["Sales"]);
+
+        const entityOk=["keyword","product targeting"].includes(entity);
+        const stateOk=isNotPaused(state)&&isNotPaused(campaignState);
+        const clicksOk=clicks>clicksThreshold;
+        const salesOk=Math.abs(sales)<1e-6;
+
+        if(entityOk&&stateOk&&clicksOk&&salesOk){
+          row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
+          out.push(row);
+        }
+      }
+    } 
+    else if(sheetName==="Sponsored Display Campaigns"){
+      for(const row of df){
+        const entity=lower(row["Entity"]);
+        const state=lower(row["State"]);
+        const adGroupState=norm(row["Ad Group State (Informational only)"]);
+        const campaignState=lower(row["Campaign State (Informational only)"]);
+        const clicks=toNumber(row["Clicks"]);
+        const sales=toNumber(row["Sales"]);
+
+        const entityOk=["audience targeting","campaign","contextual targeting"].includes(entity);
+        const enabled=state==="enabled"&&campaignState==="enabled";
+        const clicksOk=clicks>9;
+        const noSales=sales===0;
+        const adGroupOk=adGroupState!==""; 
+
+        if(entityOk&&enabled&&clicksOk&&noSales&&adGroupOk){
+          row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
+          out.push(row);
+        }
+      }
+    } 
+    else {
+      for(const row of df){
+        row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
+        const stateOk=isNotPaused(row["State"]);
+        const campOk=isNotPaused(row["Campaign State (Informational only)"]);
+        const clicks=toNumber(row["Clicks"]);
+        const sales=toNumber(row["Sales"]);
+
+        // ✅ Skip rows where Match Type is Exact in SP Search Term Report
+        if(sheetName === "SP Search Term Report" && lower(row["Match Type"]) === "exact") {
+          continue; // skip this row entirely
+        }
+
+        if(stateOk && campOk && clicks>clicksThreshold && Math.abs(sales)<1e-6) out.push(row);
+      }
+    }
+
+    return {rows:out,headers:Object.keys(df[0])};
+  }
+
+  function aoaToSheet(headers,rows,keepCols){const data=[keepCols,...rows.map(r=>keepCols.map(h=>r[h]))];return XLSX.utils.aoa_to_sheet(data);}
+  function readFile(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:"array"}));}catch(err){rej(err);}};fr.onerror=rej;fr.readAsArrayBuffer(file);});}
+  function sheetToJSON(ws){return XLSX.utils.sheet_to_json(ws,{defval:""});}
+  function setStatus(t,ok=false){const s=document.getElementById("status");const d=document.getElementById("statusDot");const tx=document.getElementById("statusText");s.classList.remove("hidden");tx.textContent=t;d.classList.toggle("ok",ok);}
+  
+  const fileEl=document.getElementById("file"),
+        clicksEl=document.getElementById("clicks"),
+        clicksSugEl=document.getElementById("clicksSug"),
+        processBtn=document.getElementById("processBtn"),
+        applySugBtn=document.getElementById("applySugBtn"),
+        downloadBtn=document.getElementById("downloadBtn"),
+        resetBtn=document.getElementById("resetBtn"),
+        suggestionRow=document.getElementById("suggestionRow");
+  let outWB=null;
+
+  processBtn.addEventListener("click",async()=>{
+    const file=fileEl.files&&fileEl.files[0];if(!file){alert("Please choose an .xlsx file first.");return;}
+    const thr=Number(clicksEl.value||0);setStatus("Reading workbook…");
+    try{outWB=await readFile(file);}catch(e){console.error(e);setStatus("Failed to read file.");return;}
+    const newWB=XLSX.utils.book_new();
+    for(const name of SHTS){
+      setStatus(`Filtering: ${name}…`);
+      const json=outWB.Sheets[name]?sheetToJSON(outWB.Sheets[name]):[];
+      const {rows}=filterSheet(name,json,thr);
+      const keepCols=COLS[name];
+      const sh=aoaToSheet([],rows,keepCols);
+      XLSX.utils.book_append_sheet(newWB,sh,name.substring(0,31));
+    }
+    outWB=newWB;
+    setStatus("✅ Step 1 complete.",true);
+    suggestionRow.classList.remove("hidden");
+    downloadBtn.classList.remove("hidden");
+    resetBtn.classList.remove("hidden");
+  });
+
+  applySugBtn.addEventListener("click",()=>{
+    if(!outWB){alert("No workbook loaded.");return;}
+    const thr=Number(clicksSugEl.value||0);
+    for(const name of SHTS){
+      const ws=outWB.Sheets[name];if(!ws)continue;
+      const json=sheetToJSON(ws);if(!json.length)continue;
+      const colClicks="Clicks";
+      json.forEach(r=>{
+        const clicks=toNumber(r[colClicks]);
+        r.Suggestion=clicks>=thr?(["SP Search Term Report","SB Search Term Report"].includes(name)?"Negative exact":"Pause"):"leave";
+      });
+      const keepCols=COLS[name];
+      const sh=aoaToSheet([],json,keepCols);
+      outWB.Sheets[name]=sh;
+    }
+    setStatus("✅ Suggestions applied.",true);
+  });
+
+  downloadBtn.addEventListener("click",()=>{
+    if(!outWB)return;
+    const outArray=XLSX.write(outWB,{bookType:"xlsx",type:"array"});
+    const outBlob=new Blob([outArray],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(outBlob);
+    a.download="bleeders_1.0_output.xlsx";document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+  });
+
+  resetBtn.addEventListener("click",()=>{
+    fileEl.value="";clicksEl.value=9;clicksSugEl.value=14;outWB=null;
+    suggestionRow.classList.add("hidden");downloadBtn.classList.add("hidden");resetBtn.classList.add("hidden");document.getElementById("status").classList.add("hidden");
+  });
+</script>
+</body>
+</html>
