@@ -12,6 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
 <style>
+  /* === Theme variables & base (copied/adapted from first file) === */
   :root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
   *{ box-sizing:border-box; }
   body{
@@ -21,6 +22,7 @@
     color: var(--ink);
   }
 
+  /* === Layout & card === */
   .wrap{ max-width: 980px; margin: 40px auto; padding: 24px; }
   .card{
     background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
@@ -32,9 +34,12 @@
 
   h1{ font-size:28px; margin:0 0 12px; }
   h3{ margin:22px 0 10px; }
+
+  /* === Text / notes === */
   .help{ color: var(--muted); margin: 6px 0 16px; }
   .small{ font-size:12px; color: var(--muted); }
 
+  /* === Form === */
   label{ display:block; font-weight:600; margin:12px 0 6px; }
   input[type="file"], select, button, textarea{
     width:100%;
@@ -47,22 +52,29 @@
   }
   textarea{ resize:vertical; min-height:180px; }
 
-  input[type="file"]:focus, select:focus, button:focus, textarea:focus{
+  input[type="file"]:focus,
+  select:focus,
+  button:focus,
+  textarea:focus{
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(122,162,255,0.25);
   }
 
+  /* Buttons: primary + subtle secondary */
   .btn{ cursor:pointer; font-weight:700; letter-spacing:.2px; border:none; }
   .btn.primary{ background: linear-gradient(90deg, #5a82ff, #7aa2ff); }
   .btn.secondary{ background:#18223a; font-weight:600; }
 
+  /* Grid rows */
   .row{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
   .mt{ margin-top:14px; }
 
+  /* Status (optional dot like first file) */
   .status{ display:flex; gap:10px; align-items:center; margin-top:12px; color:var(--muted); }
   .dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
   .dot.ok{ background: var(--ok); }
 
+  /* Footer (optional) */
   footer{ margin-top:24px; color:var(--muted); font-size:12px; text-align:center; }
   code { background:#0f1626; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
 </style>
@@ -100,12 +112,9 @@
 </div>
 
 <script>
-function log(msg){
-  const t=document.getElementById('log');
-  t.value=(new Date()).toISOString()+' | '+msg+'\n'+t.value;
-  console.log(msg);
-}
+function log(msg){ const t=document.getElementById('log'); t.value=(new Date()).toISOString()+' | '+msg+'\n'+t.value; }
 
+// simple status helpers to mirror first file's UX
 function setStatus(text, ok=false){
   const s = document.getElementById('status');
   const d = document.getElementById('statusDot');
@@ -120,6 +129,13 @@ function readFileAsync(file){
     reader.onerror=e=>reject(e);
     reader.readAsArrayBuffer(file);
   });
+}
+
+function getValue(row,candidates){
+  for(const h of candidates){ if(h in row) return row[h]; }
+  const keys=Object.keys(row); const lowerMap={}; keys.forEach(k=>lowerMap[k.toLowerCase()]=k);
+  for(const h of candidates){ if(h.toLowerCase() in lowerMap) return row[lowerMap[h.toLowerCase()]]; }
+  return undefined;
 }
 
 function formatDate(val){
@@ -184,7 +200,6 @@ document.getElementById('allFiles').addEventListener('change', e=>{
 async function proceed(){
   setStatus('Working...');
   log('Start processing');
-
   try{
     const selects=document.querySelectorAll('#fileAssignments select');
     const allFiles=document.getElementById('allFiles').files;
@@ -195,62 +210,41 @@ async function proceed(){
       if(idxs.length>0) filesMap[sel.dataset.role]=idxs.map(i=>allFiles[i]);
     });
 
-    if(!filesMap['Campaigns 30 Days'] || filesMap['Campaigns 30 Days'].length===0){
+    if(!filesMap['Campaigns 30 Days'] || filesMap['Campaigns 30 Days'].length===0)
       throw new Error('Campaigns 30 Days not assigned.');
-    }
 
     log('Files assigned');
 
-    // ✅ FIXED: use wb (lowercase b) and add guards/logs
     async function readMultiple(files){
       const allData=[];
-      for(const f of (files||[])){
-        try{
-          const { data, name } = await readFileAsync(f);
-          const wb = XLSX.read(data, { type:'array' });
-          if(!wb.SheetNames || wb.SheetNames.length===0){
-            log(`No sheets found in ${name}`);
-            continue;
-          }
-          const firstSheet = wb.SheetNames[0];
-          const sheet = wb.Sheets[firstSheet];
-          if(!sheet){
-            log(`Sheet "${firstSheet}" missing in ${name}`);
-            continue;
-          }
-          const json = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-          log(`Loaded ${json.length} rows from ${name} (${firstSheet})`);
-          allData.push(...json);
-        }catch(e){
-          log(`Failed to read ${f && f.name ? f.name : '(unknown)'}: ${e.message||e}`);
-        }
+      for(const f of files){
+        const json = await readFileAsync(f).then(file=>{
+          const wb=XLSX.read(file.data,{type:'array'});
+          return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        });
+        allData.push(...json);
       }
       return allData;
     }
 
     const data30 = await readMultiple(filesMap['Campaigns 30 Days']);
-    const data7  = await readMultiple(filesMap['Campaigns 7 Days']||[]);
+    const data7 = await readMultiple(filesMap['Campaigns 7 Days']||[]);
     const dayBefore = await readMultiple(filesMap['Day Before Yesterday']||[]);
     const yesterday = await readMultiple(filesMap['Yesterday']||[]);
 
     log('Files loaded');
 
-    // Build quick lookup maps
     const map7={}, mapDB={}, mapY={};
-    data7.forEach(r=>{ if(r && r['Campaigns']!=null) map7[r['Campaigns']]=r; });
-    dayBefore.forEach(r=>{ if(r && r['Campaigns']!=null) mapDB[r['Campaigns']]=r; });
-    yesterday.forEach(r=>{ if(r && r['Campaigns']!=null) mapY[r['Campaigns']]=r; });
+    data7.forEach(r=>{ map7[r['Campaigns']]=r; });
+    dayBefore.forEach(r=>{ mapDB[r['Campaigns']]=r; });
+    yesterday.forEach(r=>{ mapY[r['Campaigns']]=r; });
 
-    // Transform output
     const output=[];
-    data30.forEach((r30)=>{
+    data30.forEach((r30,i)=>{
       const name=r30['Campaigns'];
-      const r7 = map7[name]||{};
-      const rDB= mapDB[name]||{};
-      const rY = mapY[name]||{};
-
-      const acos30 = r30['ACOS'];
-      const acos7  = r7['ACOS'];
+      const r7=map7[name]||{};
+      const rDB=mapDB[name]||{};
+      const rY=mapY[name]||{};
 
       output.push({
         'Campaigns': name||'',
@@ -262,62 +256,40 @@ async function proceed(){
         'Spend_30days': r30['Spend']||0,
         'Orders_30days': r30['Orders']||0,
         'Sales_30days': r30['Sales']||0,
-        'ACOS_30days': acos30 ? (acos30 > 1 ? acos30/100 : acos30) : 0,
+        'ACOS_30days': r30['ACOS'] ? (r30['ACOS'] > 1 ? r30['ACOS']/100 : r30['ACOS']) : 0,
         'Last 7 Days': '',
         'Impressions_7days': r7['Impressions']||r7['Impression']||0,
         'Clicks_7days': r7['Clicks']||0,
         'Spend_7days': r7['Spend']||0,
         'Orders_7days': r7['Orders']||0,
         'Sales_7days': r7['Sales']||0,
-        'ACOS_7days': acos7 ? (acos7 > 1 ? acos7/100 : acos7) : 0,
+        'ACOS_7days': r7['ACOS'] ? (r7['ACOS'] > 1 ? r7['ACOS']/100 : r7['ACOS']) : 0,
         'Spent_DayBeforeYesterday': rDB['Spend']||0,
         'Spent_Yesterday': rY['Spend']||0
       });
     });
 
-    if(output.length===0){
-      setStatus('No rows found in “Campaigns 30 Days” files — check your input.', false);
-      log('No output rows. Stopping before export.');
-      return;
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.json_to_sheet(output);
+
+    // Percentage formatting for ACOS
+    const wsRange=XLSX.utils.decode_range(ws['!ref']);
+    const headers = Object.keys(output[0]);
+    const headerMap = {};
+    headers.forEach((h,i)=>headerMap[h]=i);
+
+    const acos30Col = XLSX.utils.encode_col(headerMap['ACOS_30days']);
+    const acos7Col  = XLSX.utils.encode_col(headerMap['ACOS_7days']);
+
+    for(let R=1; R<=wsRange.e.r; R++){
+      ws[acos30Col + (R+1)].t='n';
+      ws[acos30Col + (R+1)].z='0.00%';
+      ws[acos7Col + (R+1)].t='n';
+      ws[acos7Col + (R+1)].z='0.00%';
     }
 
-    // Build workbook
-    const wbOut = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(output);
-
-    // Percentage formatting for ACOS (guarded)
-    if(ws && ws['!ref']){
-      const wsRange = XLSX.utils.decode_range(ws['!ref']);
-      const headers = Object.keys(output[0] || {});
-      const headerMap = {};
-      headers.forEach((h,i)=>headerMap[h]=i);
-
-      const acos30Idx = headerMap['ACOS_30days'];
-      const acos7Idx  = headerMap['ACOS_7days'];
-
-      if(Number.isInteger(acos30Idx)){
-        const col = XLSX.utils.encode_col(acos30Idx);
-        for(let R=1; R<=wsRange.e.r; R++){
-          const addr = col + (R+1);
-          if(!ws[addr]) ws[addr] = { t:'n', v:0 };
-          ws[addr].t='n';
-          ws[addr].z='0.00%';
-        }
-      }
-
-      if(Number.isInteger(acos7Idx)){
-        const col = XLSX.utils.encode_col(acos7Idx);
-        for(let R=1; R<=wsRange.e.r; R++){
-          const addr = col + (R+1);
-          if(!ws[addr]) ws[addr] = { t:'n', v:0 };
-          ws[addr].t='n';
-          ws[addr].z='0.00%';
-        }
-      }
-    }
-
-    XLSX.utils.book_append_sheet(wbOut, ws, 'Bidding');
-    XLSX.writeFile(wbOut,'bidding.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, 'Bidding');
+    XLSX.writeFile(wb,'bidding.xlsx');
     setStatus('Done — bidding.xlsx downloaded', true);
     log('Export completed');
 
