@@ -103,9 +103,6 @@
 
     <h3 class="mt">Log data</h3>
     <textarea id="log" readonly></textarea>
-
-    <!-- Optional table placeholder if you later want to preview rows -->
-    <!-- <table class="mt"><thead><tr><th>Header</th></tr></thead><tbody></tbody></table> -->
   </div>
 
   <footer class="small">
@@ -179,6 +176,30 @@ function parseACOStoDecimal(v){
   const num = parseFloat(s.replace(/[^0-9.\-eE]/g,''));
   if(isNaN(num)) return 0;
   return Math.abs(num) > 1 ? num/100 : num;
+}
+
+/* Parse generic percentage-like values -> returns 0..100 (number) */
+function parsePercentToNumber(v){
+  if(v===undefined || v===null || v==='') return 0;
+  if(typeof v === 'number'){
+    if(!isFinite(v)) return 0;
+    return Math.abs(v) > 1 ? v : v*100;
+  }
+  const s = String(v).trim();
+  if(s === '') return 0;
+  if(s.includes('%')){
+    const num = parseFloat(s.replace(/[^0-9.\-eE]/g,''));
+    return isNaN(num) ? 0 : num;
+  }
+  const num = parseFloat(s.replace(/[^0-9.\-eE]/g,''));
+  if(isNaN(num)) return 0;
+  return Math.abs(num) > 1 ? num : num*100;
+}
+
+/* Utility: normalize campaign name for fuzzy match */
+function normalizeName(n){
+  if(!n) return '';
+  return String(n).toLowerCase().replace(/[^a-z0-9]/g,'').trim();
 }
 
 /* ---- File assignment UI ---- */
@@ -399,6 +420,85 @@ async function proceed(){
     }
     log('data update total rows: '+dataUpdateRows.length);
 
+    // === Calculate "Changes in placement" column for USA tab ===
+    if (usaRows.length > 0 && dataUpdateRows.length > 0) {
+      log("Calculating Changes in placement...");
+
+      // Build lookup for data update rows
+      const dataMap = {};
+      for (const r of dataUpdateRows) {
+        const campaign = (r["Campaign Name_bulk7"] || "").trim().toLowerCase();
+        const placement = (r["Placement"] || "").trim().toLowerCase();
+        if (!campaign || !placement) continue;
+        dataMap[campaign + "|" + placement] = {
+          acos: parseACOStoDecimal(r["ACOS"]),
+          spend: parseFloat(r["Spend_bulk7"] || 0),
+          orders: parseFloat(r["Orders"] || 0)
+        };
+      }
+
+      usaRows = usaRows.map((row) => {
+        const campaign = (row["Campaign Name (Informational only)"] || "").trim().toLowerCase();
+        const placement = (row["Placement"] || "").trim().toLowerCase();
+        const key = campaign + "|" + placement;
+        const update = dataMap[key] || {};
+
+        // Base percentage
+        let base = parseFloat(row["Percentage"]);
+        if (isNaN(base)) base = 0;
+
+        const acos = isNaN(update.acos) ? 0 : update.acos;
+        const spend = isNaN(update.spend) ? 0 : update.spend;
+        const orders = isNaN(update.orders) ? 0 : update.orders;
+
+        // Default: no change
+        let newValue = base;
+        let changed = false;
+
+        // === Placement logic ===
+        if (spend === 0 && orders === 0) {
+          // Keep blank
+        } else if (spend > 10 && orders === 0) {
+          newValue = base - 5;
+          changed = true;
+        } else {
+          if (acos >= 0.7) {
+            newValue = base - 5;
+            changed = true;
+          } else if (acos >= 0.5) {
+            newValue = base - 5;
+            changed = true;
+          } else if (acos >= 0.4 && acos < 0.5) {
+            // no change
+          } else if (acos >= 0.2 && acos < 0.3) {
+            newValue = base + 5;
+            changed = true;
+          } else if (acos >= 0.1 && acos < 0.2) {
+            newValue = base + 10;
+            changed = true;
+          } else if (acos > 0 && acos < 0.1) {
+            newValue = base + 15;
+            changed = true;
+          }
+        }
+
+        // Clamp
+        if (newValue < 0) newValue = 0;
+        if (newValue > 900) newValue = 900;
+
+        // Only write if there’s an actual change, else keep blank
+        if (changed && newValue !== base) {
+          row["Changes in placement"] = Math.round(newValue * 100) / 100;
+        } else {
+          row["Changes in placement"] = "";
+        }
+
+        return row;
+      });
+
+      log("✅ Changes in placement column finalized for USA tab: " + usaRows.length);
+    }
+
     // ---------- Stage 3 -> TOS ----------
     const tosSources=[{key:'30dcampaigns',name:'30d'},{key:'7dcampaigns',name:'7d'},{key:'Yesterday',name:'yesterday'}];
     let tosWideRows=[];
@@ -442,20 +542,62 @@ async function proceed(){
     // ---------- Build output workbook ----------
     const outWb=XLSX.utils.book_new();
 
+    // Single, corrected writer — leaves blanks truly blank for "Changes in placement"
     function appendSheetWithACOSFormatting(jsonRows, sheetName){
       if(!jsonRows || jsonRows.length===0) return;
-      const ws = XLSX.utils.json_to_sheet(jsonRows, {skipHeader:false});
-      const headers = Object.keys(jsonRows[0]);
+      const rowsToWrite = jsonRows.map(r=>{
+        const copy = {};
+        for(const k of Object.keys(r)){
+          if(k === '__changes_mark_red') continue;
+          copy[k] = r[k];
+        }
+        return copy;
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rowsToWrite, {skipHeader:false});
+      const headers = Object.keys(rowsToWrite[0]);
+
+      // Format ACOS column as percent
       const acosIndex = headers.findIndex(h => h.toLowerCase().replace(/\s+/g,'') === 'acos' || h.toLowerCase().includes('acos'));
       if(acosIndex !== -1){
         const colLetter = XLSX.utils.encode_col(acosIndex);
-        for(let r=0;r<jsonRows.length;r++){
+        for(let r=0;r<rowsToWrite.length;r++){
           const addr = colLetter + (r + 2);
-          const val = (jsonRows[r][headers[acosIndex]] === undefined || jsonRows[r][headers[acosIndex]] === '') ? 0 : jsonRows[r][headers[acosIndex]];
+          const val = (rowsToWrite[r][headers[acosIndex]] === undefined || rowsToWrite[r][headers[acosIndex]] === '') ? 0 : rowsToWrite[r][headers[acosIndex]];
           const dec = parseACOStoDecimal(val);
           ws[addr] = { t: 'n', v: dec, z: '0.00%' };
         }
       }
+
+      // Format Changes in placement column and keep blanks empty
+      const changeIndex = headers.findIndex(h => h.toLowerCase().replace(/\s+/g,'') === 'changesinplacement' || h.toLowerCase() === 'changes in placement');
+      if(changeIndex !== -1){
+        const colLetter = XLSX.utils.encode_col(changeIndex);
+        for(let r=0;r<rowsToWrite.length;r++){
+          const addr = colLetter + (r + 2);
+          const value = rowsToWrite[r][headers[changeIndex]];
+          if (value === '' || value === undefined || value === null) {
+            if (ws[addr]) delete ws[addr]; // ensure truly blank
+          } else {
+            ws[addr] = { t: 'n', v: Number(value) };
+          }
+        }
+        // Optional: keep the styling attempt (wrapped in try/catch)
+        try{
+          for(let r=0;r<jsonRows.length;r++){
+            const redMark = jsonRows[r]['__changes_mark_red'];
+            if(redMark){
+              const addr = XLSX.utils.encode_col(changeIndex) + (r + 2);
+              if(!ws[addr]) ws[addr] = { t: 'n', v: Number(rowsToWrite[r][headers[changeIndex]]||0) };
+              ws[addr].s = {
+                fill: { patternType: "solid", fgColor: { rgb: "FFFFC7CE" } },
+                font: { color: { rgb: "9C0006" } }
+              };
+            }
+          }
+        }catch(e){ log('Warning: could not apply XLSX cell styles: '+(e && e.message?e.message:e)); }
+      }
+
       XLSX.utils.book_append_sheet(outWb, ws, sheetName);
       log(sheetName+' sheet appended: '+jsonRows.length);
     }
@@ -478,6 +620,7 @@ async function proceed(){
     setStatus('Error');
   }
 }
+
 document.getElementById('proceed').addEventListener('click',proceed);
 </script>
 </body>
