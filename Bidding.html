@@ -87,7 +87,7 @@
 
 <script>
 function setStatus(msg, ok){ document.getElementById('status').textContent=msg; const dot=document.getElementById('statusDot'); ok?dot.classList.add('ok'):dot.classList.remove('ok'); }
-function log(msg){ const t=document.getElementById('log'); t.value+=(t.value?"\n":"")+msg; t.scrollTop=t.scrollHeight; }
+function log(msg){ const t=document.getElementById('log'); t.value+=(t.value?"\\n":"")+msg; t.scrollTop=t.scrollHeight; }
 function formatDate(v){
   if (!v) return '';
   // Already a Date
@@ -103,8 +103,19 @@ function formatDate(v){
   const d = new Date(v);
   return isNaN(d) ? '' : d.toISOString().slice(0,10);
 }
-function num(v){ if(v==null)return 0; if(typeof v==='number')return v||0; const n=parseFloat(String(v).replace(/[,$%\s]/g,'')); return isNaN(n)?0:n; }
-function normName(v){ return String(v||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function num(v){ if(v==null)return 0; if(typeof v==='number')return v||0; const n=parseFloat(String(v).replace(/[,$%\\s]/g,'')); return isNaN(n)?0:n; }
+function normName(v){ return String(v||'').toLowerCase().replace(/\\s+/g,' ').trim(); }
+
+// NEW: robust normalization of percent-like inputs to a 0–1 fraction
+function toPct01(v){
+  let n = num(v);
+  if (!isFinite(n) || n <= 0) return 0;
+  // If value is clearly in percentage points (>=10), convert to fraction
+  // Examples: 20 -> 0.20, 35 -> 0.35, 113 -> 1.13
+  if (n >= 10) return n / 100;
+  // Otherwise it's already a fraction (e.g., 0.2 or 1.13 from Excel percent), keep as-is
+  return n;
+}
 
 const ROLES=['Campaigns 30 Days','Campaigns 7 Days','Day Before Yesterday','Yesterday'];
 const fileInput=document.getElementById('allFiles');
@@ -152,23 +163,26 @@ async function proceed(){
         'Portfolio':r['Portfolio']||r['Portifolio']||'','Budget':r['Budget']||0,
         'Impressions_30days':r['Impressions']||0,'Clicks_30days':r['Clicks']||0,'Spend_30days':r['Spend']||0,
         'Orders_30days':r['Orders']||0,'Sales_30days':r['Sales']||0,
-        'ACOS_30days':r['ACOS']?(r['ACOS']>1?r['ACOS']/100:r['ACOS']):0,
+        // FIX: normalize ACOS to 0–1 fraction regardless of input shape
+        'ACOS_30days': toPct01(r['ACOS']),
         'Last 7 Days':'','Impressions_7days':num(r7['Impressions']),
         'Clicks_7days':num(r7['Clicks']),'Spend_7days':num(r7['Spend']),
         'Orders_7days':num(r7['Orders']),'Sales_7days':num(r7['Sales']),
-        'ACOS_7days':(v=>{v=num(v);return v>1?v/100:v;})(r7['ACOS']),
+        // FIX: same normalization for 7-day ACOS
+        'ACOS_7days': toPct01(r7['ACOS']),
         'Spent_DayBeforeYesterday':num(rDB['Spend']),'Spent_Yesterday':num(rY['Spend'])
       };
       const clicks7 = +row['Clicks_7days'],
       sales7 = +row['Sales_7days'],
       acos7 = +row['ACOS_7days'];
 
+// Keep downstream logic unchanged, now it operates on a reliable 0–1 ACOS
 row['Budget Check'] = '';
 row['Lower bids for Bleeders w/ no Sales'] = (clicks7 >= TH.clicksNoSales && sales7 === 0) ? 'TRUE' : 'FALSE';
 row['Lower bids for targets w/ ACOS higher than'] = (acos7 > TH.highAcos) ? TH.highAcos : '';
 row['Increase bids to Targets w/ Low Clicks'] = (clicks7 < TH.lowClicks) ? '3%' : '';
 row['Increase bids for Targets with good ACOS'] = (acos7 > 0 && acos7 <= TH.lowAcos) ? '3%' : '';
-// ✅ Updated line: ignore ACOS = 0
+// ✅ ignore ACOS = 0
 row['Crateria: Good ACOS'] = (acos7 > 0 && acos7 < TH.lowAcos) ? TH.lowAcos : '';
 row['Change Campaign Budget'] = r['Change Campaign Budget'] || '';
 out.push(row);
