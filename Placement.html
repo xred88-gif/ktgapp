@@ -165,7 +165,7 @@ function parseACOStoDecimal(v){
   if(v===undefined || v===null || v==='') return 0;
   if(typeof v === 'number'){
     if(!isFinite(v)) return 0;
-    return Math.abs(v) > 1 ? v/100 : v;
+    return v; // keep numeric inputs as-is to avoid double-scaling
   }
   const s = String(v).trim();
   if(s === '') return 0;
@@ -421,85 +421,87 @@ async function proceed(){
     log('data update total rows: '+dataUpdateRows.length);
 
     // === Calculate "Changes in placement" column for USA tab ===
-    if (usaRows.length > 0 && dataUpdateRows.length > 0) {
-      log("Calculating Changes in placement...");
+if (usaRows.length > 0 && dataUpdateRows.length > 0) {
+  log("Calculating Changes in placement...");
 
-      // Build lookup for data update rows
-      const dataMap = {};
-      for (const r of dataUpdateRows) {
-        const campaign = (r["Campaign Name_bulk7"] || "").trim().toLowerCase();
-        const placement = (r["Placement"] || "").trim().toLowerCase();
-        if (!campaign || !placement) continue;
-        dataMap[campaign + "|" + placement] = {
-          acos: parseACOStoDecimal(r["ACOS"]),
-          spend: parseFloat(r["Spend_bulk7"] || 0),
-          orders: parseFloat(r["Orders"] || 0)
-        };
+  // Build lookup for data update rows
+  const dataMap = {};
+  for (const r of dataUpdateRows) {
+    const campaign = (r["Campaign Name_bulk7"] || "").trim().toLowerCase();
+    const placement = (r["Placement"] || "").trim().toLowerCase();
+    if (!campaign || !placement) continue;
+    dataMap[campaign + "|" + placement] = {
+      acos: parseACOStoDecimal(r["ACOS"]),
+      spend: parseFloat(r["Spend_bulk7"] || 0),
+      orders: parseFloat(r["Orders"] || 0)
+    };
+  }
+
+  usaRows = usaRows.map((row) => {
+    const campaign = (row["Campaign Name (Informational only)"] || "").trim().toLowerCase();
+    const placement = (row["Placement"] || "").trim().toLowerCase();
+    const key = campaign + "|" + placement;
+    const update = dataMap[key] || {};
+
+    // Base percentage from the data tab
+    let base = parseFloat(row["Percentage"]);
+    if (isNaN(base)) base = 0;
+
+    const acos = isNaN(update.acos) ? 0 : update.acos;
+    const spend = isNaN(update.spend) ? 0 : update.spend;
+    const orders = isNaN(update.orders) ? 0 : update.orders;
+
+    let newValue = base;
+    let changed = false;
+
+    // === Placement logic (UPDATED) ===
+    if (spend > 10 && orders === 0) {
+      // High spend with no orders: decrease placement
+      newValue = base - 5;
+      changed = true;
+    } else if (spend > 0 && orders === 0) {
+      // NEW: Some spend but no orders: increase placement
+      newValue = base + 5;
+      changed = true;
+    } else if (spend === 0 && orders === 0) {
+      // Previously skipped; now we increase by +5
+      newValue = base + 5;
+      changed = true;
+    } else {
+      // ACOS-based ladder
+      if (acos >= 0.7) {
+        newValue = base - 5; changed = true;
+      } else if (acos >= 0.5) {
+        newValue = base - 5; changed = true;
+      } else if (acos >= 0.4 && acos < 0.5) {
+        // no change
+      } else if (acos >= 0.2 && acos < 0.3) {
+        newValue = base + 5; changed = true;
+      } else if (acos >= 0.1 && acos < 0.2) {
+        newValue = base + 10; changed = true;
+      } else if (acos > 0 && acos < 0.1) {
+        newValue = base + 15; changed = true;
       }
-
-      usaRows = usaRows.map((row) => {
-        const campaign = (row["Campaign Name (Informational only)"] || "").trim().toLowerCase();
-        const placement = (row["Placement"] || "").trim().toLowerCase();
-        const key = campaign + "|" + placement;
-        const update = dataMap[key] || {};
-
-        // Base percentage
-        let base = parseFloat(row["Percentage"]);
-        if (isNaN(base)) base = 0;
-
-        const acos = isNaN(update.acos) ? 0 : update.acos;
-        const spend = isNaN(update.spend) ? 0 : update.spend;
-        const orders = isNaN(update.orders) ? 0 : update.orders;
-
-        // Default: no change
-        let newValue = base;
-        let changed = false;
-
-        // === Placement logic ===
-        if (spend === 0 && orders === 0) {
-          // Keep blank
-        } else if (spend > 10 && orders === 0) {
-          newValue = base - 5;
-          changed = true;
-        } else {
-          if (acos >= 0.7) {
-            newValue = base - 5;
-            changed = true;
-          } else if (acos >= 0.5) {
-            newValue = base - 5;
-            changed = true;
-          } else if (acos >= 0.4 && acos < 0.5) {
-            // no change
-          } else if (acos >= 0.2 && acos < 0.3) {
-            newValue = base + 5;
-            changed = true;
-          } else if (acos >= 0.1 && acos < 0.2) {
-            newValue = base + 10;
-            changed = true;
-          } else if (acos > 0 && acos < 0.1) {
-            newValue = base + 15;
-            changed = true;
-          }
-        }
-
-        // Clamp
-        if (newValue < 0) newValue = 0;
-        if (newValue > 900) newValue = 900;
-
-        // Only write if there’s an actual change, else keep blank
-        if (changed && newValue !== base) {
-          row["Changes in placement"] = Math.round(newValue * 100) / 100;
-        } else {
-          row["Changes in placement"] = "";
-        }
-
-        return row;
-      });
-
-      log("✅ Changes in placement column finalized for USA tab: " + usaRows.length);
     }
 
-    // ---------- Stage 3 -> TOS ----------
+    // Clamp to 0–100 (UPDATED)
+    if (newValue < 0) newValue = 0;
+    if (newValue > 100) newValue = 100;
+
+    // Only write if there’s an actual change, else keep blank
+    if (changed && newValue !== base) {
+      row["Changes in placement"] = Math.round(newValue * 100) / 100;
+    } else {
+      row["Changes in placement"] = "";
+    }
+
+    return row;
+  });
+
+  log("✅ Changes in placement column finalized for USA tab: " + usaRows.length);
+}
+
+// ---------- Stage 3 -> TOS ----------
     const tosSources=[{key:'30dcampaigns',name:'30d'},{key:'7dcampaigns',name:'7d'},{key:'Yesterday',name:'yesterday'}];
     let tosWideRows=[];
     let maxTosRows=0;
@@ -557,14 +559,19 @@ async function proceed(){
       const ws = XLSX.utils.json_to_sheet(rowsToWrite, {skipHeader:false});
       const headers = Object.keys(rowsToWrite[0]);
 
-      // Format ACOS column as percent
+      // Format ACOS column as percent (avoid double parsing of numbers)
       const acosIndex = headers.findIndex(h => h.toLowerCase().replace(/\s+/g,'') === 'acos' || h.toLowerCase().includes('acos'));
       if(acosIndex !== -1){
         const colLetter = XLSX.utils.encode_col(acosIndex);
         for(let r=0;r<rowsToWrite.length;r++){
           const addr = colLetter + (r + 2);
-          const val = (rowsToWrite[r][headers[acosIndex]] === undefined || rowsToWrite[r][headers[acosIndex]] === '') ? 0 : rowsToWrite[r][headers[acosIndex]];
-          const dec = parseACOStoDecimal(val);
+          const rawVal = rowsToWrite[r][headers[acosIndex]];
+          let dec;
+          if (typeof rawVal === 'number') {
+            dec = rawVal; // already normalized earlier
+          } else {
+            dec = parseACOStoDecimal(rawVal);
+          }
           ws[addr] = { t: 'n', v: dec, z: '0.00%' };
         }
       }
