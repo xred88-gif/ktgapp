@@ -1,9 +1,9 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bleeders 1.0</title>
+  <title>Bleeders 1.1 (case-insensitive)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -38,7 +38,7 @@
   <div class="wrap">
     <div class="card">
       <h1>📊 Bleeders 1.0</h1>
-      <p class="help">Upload your Amazon 60 days bulk file, set the <strong>Clicks &gt;</strong> threshold, and download a new workbook with only the specified tabs and columns with filters applied. After filtering, you can apply suggestions.</p>
+      <p class="help">Upload your Amazon 60 days bulk file, set the <strong>Clicks &gt;</strong> threshold, and download a new workbook with only the specified tabs and columns with filters applied.</p>
 
       <label for="file">Excel file (.xlsx)</label>
       <input id="file" type="file" accept=".xlsx" />
@@ -76,7 +76,7 @@
       </div>
 
       <p class="help mt small">
-        Sheets processed (if present):
+        Sheets processed (case-insensitive match):
         <span class="pill">1. SP Search Term Report</span>
         <span class="pill">2. Sponsored Products Campaigns</span>
         <span class="pill">3. SB Search Term Report</span>
@@ -92,6 +92,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
+  // Canonical columns to output (these headers will be written to the result)
   const COLS = {
     "SP Search Term Report": [
       "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting","Match Type","Suggestion","Customer Search Term",
@@ -114,82 +115,188 @@
     ]
   };
 
-  const SHTS = Object.keys(COLS);
-  function norm(v){return v==null?"":String(v).trim();}
-  function lower(v){return norm(v).toLowerCase();}
-  function toNumber(v){const s=norm(v).replace(/[^0-9.\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
-  function isNotPaused(v){const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";}
+  // Header aliases to tolerate capitalization/wording variants
+  const ALIASES = new Map([
+    ["campaign name (informational only)", ["campaign name (informational only)","campaign name (informational Only)","Campaign name (Informational only)"]],
+    ["ad group name (informational only)", ["ad group name (informational only)","ad group name (Informational only)"]],
+    ["keyword / product targeting", ["keyword / product targeting"]],
+    ["match type", ["match type"]],
+    ["suggestion", ["suggestion"]],
+    ["customer search term", ["customer search term"]],
+    ["impressions", ["impressions"]],
+    ["clicks", ["clicks"]],
+    ["click-through rate", ["click-through rate","click-through Rate"]],
+    ["cpc", ["cpc"]],
+    ["spend", ["spend"]],
+    ["sales", ["sales"]],
+    ["acos", ["acos"]],
+    ["roas", ["roas"]],
+    ["orders", ["orders"]],
+    ["entity", ["entity"]],
+    ["state", ["state"]],
+    ["campaign state (informational only)", ["campaign state (informational only)"]],
+    ["ad group state (informational only)", ["ad group state (informational only)"]],
+    ["keyword text", ["keyword text"]],
+    ["product targeting expression", ["product targeting expression","targeting expression","resolved product targeting expression"]]
+  ]);
 
-  function combineKeywordAndTarget(row){
-    const keyword = norm(row["Keyword Text"]);
-    const targeting = norm(row["Product Targeting Expression"] || row["Targeting Expression"]);
+  const SHTS = Object.keys(COLS);
+
+  // ---------- utilities ----------
+  const norm = v => v==null ? "" : String(v).trim();
+  const lower = v => norm(v).toLowerCase();
+  function toNumber(v){const s=norm(v).replace(/[^0-9.\\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
+  const isNotPaused = v => {const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";};
+
+  // Case-insensitive sheet matching
+  function normalizeSheetName(s){
+    return lower(String(s)).replace(/\\s+/g," ").trim();
+  }
+  function buildSheetMap(workbook){
+    const map=new Map();
+    for(const realName of workbook.SheetNames){
+      map.set(normalizeSheetName(realName), realName);
+    }
+    return map;
+  }
+  function findSheetName(sheetMap, target){
+    return sheetMap.get(normalizeSheetName(target)) || null;
+  }
+
+  // Build a case-insensitive key map for a row
+  function keyMap(row){
+    const m=new Map();
+    for(const k of Object.keys(row)){
+      m.set(lower(k), row[k]);
+    }
+    return m;
+  }
+  function get(rowMap, canonical){
+    const wanted = lower(canonical);
+    if(rowMap.has(wanted)) return rowMap.get(wanted);
+    const aliasList = ALIASES.get(wanted) || [];
+    for(const cand of aliasList){
+      const k = lower(cand);
+      if(rowMap.has(k)) return rowMap.get(k);
+    }
+    return ""; // default empty if not found
+  }
+
+  function combineKeywordAndTarget(rowMap){
+    const keyword = norm(get(rowMap, "Keyword Text"));
+    const targeting = norm(get(rowMap, "Product Targeting Expression"));
     return keyword && targeting ? `${keyword} / ${targeting}` : (keyword || targeting);
   }
 
   function filterSheet(sheetName, df, clicksThreshold){
     const out=[]; if(!df.length) return {rows:[],headers:[]};
+    const keepCols = COLS[sheetName];
 
     if(sheetName==="Sponsored Products Campaigns"){
       for(const row of df){
-        const entity=lower(row["Entity"]);
-        const state=lower(row["State"]);
-        const campaignState=lower(row["Campaign State (Informational only)"]);
-        const clicks=toNumber(row["Clicks"]);
-        const sales=toNumber(row["Sales"]);
-
+        const m=keyMap(row);
+        const entity=lower(get(m,"Entity"));
+        const state=lower(get(m,"State"));
+        const campaignState=lower(get(m,"Campaign State (Informational only)"));
+        const clicks=toNumber(get(m,"Clicks"));
+        const sales=toNumber(get(m,"Sales"));
         const entityOk=["keyword","product targeting"].includes(entity);
         const stateOk=isNotPaused(state)&&isNotPaused(campaignState);
         const clicksOk=clicks>clicksThreshold;
         const salesOk=Math.abs(sales)<1e-6;
-
         if(entityOk&&stateOk&&clicksOk&&salesOk){
-          row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
-          out.push(row);
+          const rowOut={};
+          rowOut["Campaign Name (Informational only)"]=get(m,"Campaign Name (Informational only)");
+          rowOut["Ad Group Name (Informational only)"]=get(m,"Ad Group Name (Informational only)");
+          rowOut["Keyword / Product Targeting"]=combineKeywordAndTarget(m);
+          rowOut["Match Type"]=get(m,"Match Type");
+          rowOut["Suggestion"]="";
+          rowOut["Clicks"]=get(m,"Clicks");
+          rowOut["Click-through Rate"]=get(m,"Click-through Rate");
+          rowOut["CPC"]=get(m,"CPC");
+          rowOut["Spend"]=get(m,"Spend");
+          rowOut["Sales"]=get(m,"Sales");
+          rowOut["ACOS"]=get(m,"ACOS");
+          rowOut["Orders"]=get(m,"Orders");
+          out.push(rowOut);
         }
       }
     } 
     else if(sheetName==="Sponsored Display Campaigns"){
       for(const row of df){
-        const entity=lower(row["Entity"]);
-        const state=lower(row["State"]);
-        const adGroupState=norm(row["Ad Group State (Informational only)"]);
-        const campaignState=lower(row["Campaign State (Informational only)"]);
-        const clicks=toNumber(row["Clicks"]);
-        const sales=toNumber(row["Sales"]);
-
+        const m=keyMap(row);
+        const entity=lower(get(m,"Entity"));
+        const state=lower(get(m,"State"));
+        const adGroupState=lower(get(m,"Ad Group State (Informational only)"));
+        const campaignState=lower(get(m,"Campaign State (Informational only)"));
+        const clicks=toNumber(get(m,"Clicks"));
+        const sales=toNumber(get(m,"Sales"));
         const entityOk=["audience targeting","campaign","contextual targeting"].includes(entity);
         const enabled=state==="enabled"&&campaignState==="enabled";
-        const clicksOk=clicks>9;
+        const clicksOk=clicks>9; // original logic
         const noSales=sales===0;
         const adGroupOk=adGroupState!==""; 
-
         if(entityOk&&enabled&&clicksOk&&noSales&&adGroupOk){
-          row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
-          out.push(row);
+          const rowOut={};
+          rowOut["Campaign Name (Informational only)"]=get(m,"Campaign Name (Informational only)");
+          rowOut["Ad Group Name (Informational only)"]=get(m,"Ad Group Name (Informational only)");
+          rowOut["Keyword / Product Targeting"]=combineKeywordAndTarget(m);
+          rowOut["Clicks"]=get(m,"Clicks");
+          rowOut["Suggestion"]="";
+          rowOut["Spend"]=get(m,"Spend");
+          rowOut["CPC"]=get(m,"CPC");
+          rowOut["Sales"]=get(m,"Sales");
+          rowOut["ACOS"]=get(m,"ACOS");
+          rowOut["Orders"]=get(m,"Orders");
+          out.push(rowOut);
         }
       }
     } 
     else {
       for(const row of df){
-        row["Keyword / Product Targeting"]=combineKeywordAndTarget(row);
-        const stateOk=isNotPaused(row["State"]);
-        const campOk=isNotPaused(row["Campaign State (Informational only)"]);
-        const clicks=toNumber(row["Clicks"]);
-        const sales=toNumber(row["Sales"]);
-
-        // ✅ Skip rows where Match Type is Exact in SP Search Term Report
-        if(sheetName === "SP Search Term Report" && lower(row["Match Type"]) === "exact") {
-          continue; // skip this row entirely
+        const m=keyMap(row);
+        const stateOk=isNotPaused(get(m,"State"));
+        const campOk=isNotPaused(get(m,"Campaign State (Informational only)"));
+        const clicks=toNumber(get(m,"Clicks"));
+        const sales=toNumber(get(m,"Sales"));
+        // Skip rows where Match Type is Exact in SP Search Term Report
+        if(sheetName === "SP Search Term Report" && lower(get(m,"Match Type")) === "exact") {
+          continue;
         }
-
-        if(stateOk && campOk && clicks>clicksThreshold && Math.abs(sales)<1e-6) out.push(row);
+        if(stateOk && campOk && clicks>clicksThreshold && Math.abs(sales)<1e-6){
+          const rowOut={};
+          rowOut["Campaign Name (Informational only)"]=get(m,"Campaign Name (Informational only)");
+          rowOut["Ad Group Name (Informational only)"]=get(m,"Ad Group Name (Informational only)");
+          rowOut["Keyword / Product Targeting"]=combineKeywordAndTarget(m);
+          if(true){ // allow Match Type on Sponsored Brands Campaigns too
+            rowOut["Match Type"]=get(m,"Match Type");
+          }
+          if(sheetName.includes("Search Term")){
+            rowOut["Customer Search Term"]=get(m,"Customer Search Term");
+          }
+          rowOut["Suggestion"]="";
+          rowOut["Clicks"]=get(m,"Clicks");
+          rowOut["Click-through Rate"]=get(m,"Click-through Rate");
+          rowOut["CPC"]=get(m,"CPC");
+          rowOut["Spend"]=get(m,"Spend");
+          rowOut["Sales"]=get(m,"Sales");
+          rowOut["ACOS"]=get(m,"ACOS");
+          if(sheetName!=="Sponsored Display Campaigns"){
+            rowOut["ROAS"]=get(m,"ROAS");
+          }
+          rowOut["Orders"]=get(m,"Orders");
+          out.push(rowOut);
+        }
       }
     }
 
-    return {rows:out,headers:Object.keys(df[0])};
+    return {rows:out,headers:keepCols};
   }
 
-  function aoaToSheet(headers,rows,keepCols){const data=[keepCols,...rows.map(r=>keepCols.map(h=>r[h]))];return XLSX.utils.aoa_to_sheet(data);}
+  function aoaToSheet(headers,rows,keepCols){
+    const data=[keepCols, ...rows.map(r => keepCols.map(h => (r[h]===undefined? "": r[h])))];
+    return XLSX.utils.aoa_to_sheet(data);
+  }
   function readFile(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:"array"}));}catch(err){rej(err);}};fr.onerror=rej;fr.readAsArrayBuffer(file);});}
   function sheetToJSON(ws){return XLSX.utils.sheet_to_json(ws,{defval:""});}
   function setStatus(t,ok=false){const s=document.getElementById("status");const d=document.getElementById("statusDot");const tx=document.getElementById("statusText");s.classList.remove("hidden");tx.textContent=t;d.classList.toggle("ok",ok);}
@@ -207,14 +314,20 @@
   processBtn.addEventListener("click",async()=>{
     const file=fileEl.files&&fileEl.files[0];if(!file){alert("Please choose an .xlsx file first.");return;}
     const thr=Number(clicksEl.value||0);setStatus("Reading workbook…");
-    try{outWB=await readFile(file);}catch(e){console.error(e);setStatus("Failed to read file.");return;}
+    let inWB;
+    try{inWB=await readFile(file);}catch(e){console.error(e);setStatus("Failed to read file.");return;}
+
+    // Build map of real sheet names (case-insensitive)
+    const sheetMap = buildSheetMap(inWB);
+
     const newWB=XLSX.utils.book_new();
     for(const name of SHTS){
-      setStatus(`Filtering: ${name}…`);
-      const json=outWB.Sheets[name]?sheetToJSON(outWB.Sheets[name]):[];
-      const {rows}=filterSheet(name,json,thr);
+      const realName = findSheetName(sheetMap, name);
+      setStatus(`Filtering: ${name}${realName? "": " (not found)"}…`);
+      const json=realName? sheetToJSON(inWB.Sheets[realName]) : [];
+      const {rows,headers}=filterSheet(name,json,thr);
       const keepCols=COLS[name];
-      const sh=aoaToSheet([],rows,keepCols);
+      const sh=aoaToSheet(headers,rows,keepCols);
       XLSX.utils.book_append_sheet(newWB,sh,name.substring(0,31));
     }
     outWB=newWB;
@@ -236,7 +349,7 @@
         r.Suggestion=clicks>=thr?(["SP Search Term Report","SB Search Term Report"].includes(name)?"Negative exact":"Pause"):"leave";
       });
       const keepCols=COLS[name];
-      const sh=aoaToSheet([],json,keepCols);
+      const sh=aoaToSheet(keepCols,json,keepCols);
       outWB.Sheets[name]=sh;
     }
     setStatus("✅ Suggestions applied.",true);
@@ -247,7 +360,7 @@
     const outArray=XLSX.write(outWB,{bookType:"xlsx",type:"array"});
     const outBlob=new Blob([outArray],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const a=document.createElement("a");a.href=URL.createObjectURL(outBlob);
-    a.download="bleeders_1.0_output.xlsx";document.body.appendChild(a);a.click();
+    a.download="bleeders_1.1_output.xlsx";document.body.appendChild(a);a.click();
     setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
   });
 
