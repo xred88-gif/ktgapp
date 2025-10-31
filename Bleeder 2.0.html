@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -37,7 +37,7 @@ code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid
 <body>
 <div class="wrap">
   <div class="card">
-    <h1>📊 Bleeders 2.0 </h1>
+    <h1>📊 Bleeders 2.0</h1>
     <p class="help">Upload your Amazon 60 days bulk file. Choose whether to include Suggestions before exporting.</p>
 
     <label for="file">Excel file (.xlsx)</label>
@@ -126,72 +126,115 @@ const COLS = {
     "Campaign Name (Informational only)","Product Targeting Expression","Match Type","Clicks","Suggestion","CPC","Spend","Sales","ACOS","Orders"
   ],
   "Sponsored Display Campaigns": [
-    "Campaign Name (Informational only)",
-    "Ad Group Name (Informational only)",
-    "Targeting Expression",
-    "Clicks",
-    "Suggestion",
-    "Spend",
-    "CPC",
-    "Sales",
-    "ACOS",
-    "Orders"
+    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Targeting Expression","Clicks","Suggestion","Spend","CPC","Sales","ACOS","Orders"
   ]
 };
 
-// === Helper Functions ===
-function norm(v){ return v==null?"":String(v).trim(); }
-function lower(v){ return norm(v).toLowerCase(); }
-function isNotPaused(val){ const s=lower(val); return s!=="paused" && s!=="pause" && s!=="stopped" && s!=="disabled" && s!==""; }
-function parseNumber(val){ if(val==null) return NaN; let s=String(val).replace(/\s/g,"").replace("%","").replace(",","."), n=parseFloat(s); return isNaN(n)?NaN:n; }
-function getColFlexible(df, keywords){ const keys=Object.keys(df); for(const key of keys){ const clean=key.replace(/\s|\(|\)|%/g,"").toLowerCase(); for(const kw of keywords){ const ck=kw.replace(/\s|\(|\)|%/g,"").toLowerCase(); if(clean.includes(ck)) return key; } } return null; }
+// === Helpers ===
+const norm = v => v==null ? "" : String(v).trim();
+const lower = v => norm(v).toLowerCase();
+const isNotPaused = val => {
+  const s = lower(val);
+  return s !== "paused" && s !== "pause" && s !== "stopped" && s !== "disabled" && s !== "";
+};
+function parseNumber(val){
+  if (val==null) return NaN;
+  let s = String(val).replace(/\s/g,"").replace("%","").replace(",",".");
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+// flexible, case-insensitive column finder
+function getColFlexible(rowObj, keywords){
+  if(!rowObj) return null;
+  const keys = Object.keys(rowObj);
+  for(const key of keys){
+    const clean = key.replace(/\s|\(|\)|%/g,"").toLowerCase();
+    for(const kw of keywords){
+      const ck = String(kw).replace(/\s|\(|\)|%/g,"").toLowerCase();
+      if(clean.includes(ck)) return key;
+    }
+  }
+  return null;
+}
+// case-insensitive worksheet lookup
+function getSheetInsensitive(wb, expectedName){
+  if(!wb || !wb.SheetNames) return null;
+  const want = expectedName.toLowerCase();
+  for(const n of wb.SheetNames){
+    if(n.toLowerCase() === want) return wb.Sheets[n];
+  }
+  // loose contains match fallback
+  for(const n of wb.SheetNames){
+    if(n.toLowerCase().includes(want)) return wb.Sheets[n];
+  }
+  return null;
+}
 
-// === Filtering & Suggestions ===
-function filterAndSuggestSheet(name, df, ordersMax, acosMap, sugACOS, withSuggestions){
-  const acosMin=acosMap[name]||0;
-  const out=[];
-  const colState = getColFlexible(df[0]||{}, ["State"]);
-  const colCampState = getColFlexible(df[0]||{}, ["Campaign State"]);
-  const colOrders = getColFlexible(df[0]||{}, ["Orders"]);
-  const colACOS = getColFlexible(df[0]||{}, ["ACOS"]);
-  const colCTR = getColFlexible(df[0]||{}, ["Click-through Rate"]);
-  const colROAS = getColFlexible(df[0]||{}, ["ROAS"]);
-  const colKeyword = getColFlexible(df[0]||{}, ["Keyword Text"]);
-  const colPT = getColFlexible(df[0]||{}, ["Product Targeting Expression","Targeting Expression"]);
-  const colEntity = getColFlexible(df[0]||{}, ["Entity"]);
-  const colAdGroupState = getColFlexible(df[0]||{}, ["Ad Group State"]);
+// Canonicalize row keys to match output headers
+function remapToCanonical(row, targetHeaders){
+  const out = {...row};
+  const clean = s => String(s||"").toLowerCase().replace(/[\s\(\)%_\-\.\/]/g,"");
+  const keys = Object.keys(row);
+  for(const h of targetHeaders){
+    if(out[h] !== undefined) continue;
+    const ch = clean(h);
+    for(const k of keys){
+      if(clean(k) === ch){ out[h] = row[k]; break; }
+    }
+  }
+  return out;
+}
+
+// Filtering & Suggestions (SB now uses >= like the others)
+function filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, withSuggestions){
+  const acosMin = acosMap[canonicalName] || 0;
+  const out = [];
+
+  const sample = df[0] || {};
+  const colState        = getColFlexible(sample, ["State"]);
+  const colCampState    = getColFlexible(sample, ["Campaign State"]);
+  const colAdGroupState = getColFlexible(sample, ["Ad Group State"]);
+  const colOrders       = getColFlexible(sample, ["Orders"]);
+  const colACOS         = getColFlexible(sample, ["ACOS"]);
+  const colCTR          = getColFlexible(sample, ["Click-through Rate","CTR"]);
+  const colROAS         = getColFlexible(sample, ["ROAS"]);
+  const colKeyword      = getColFlexible(sample, ["Keyword Text"]);
+  const colPT           = getColFlexible(sample, ["Product Targeting Expression","Targeting Expression"]);
+  const colEntity       = getColFlexible(sample, ["Entity"]);
+  const colMatchType    = getColFlexible(sample, ["Match Type"]);
 
   for(const row of df){
-    // === Sponsored Products Campaigns entity filter ===
-    if(name === "Sponsored Products Campaigns" && colEntity){
-      const entityVal = norm(row[colEntity]).toLowerCase();
+    // entity filters
+    if(canonicalName === "Sponsored Products Campaigns" && colEntity){
+      const entityVal = lower(row[colEntity]);
       if(entityVal !== "keyword" && entityVal !== "product targeting") continue;
     }
-
-    // === Sponsored Display Campaigns entity filter ===
-    if(name === "Sponsored Display Campaigns" && colEntity){
-      const entityVal = norm(row[colEntity]).toLowerCase();
+    if(canonicalName === "Sponsored Display Campaigns" && colEntity){
+      const entityVal = lower(row[colEntity]);
       if(entityVal === "ad group" || entityVal === "product ad") continue;
     }
-
-    // === Sponsored Display Campaigns Ad Group State filter ===
-    if(name === "Sponsored Display Campaigns" && colAdGroupState){
-      const agState = norm(row[colAdGroupState]).toLowerCase();
+    if(canonicalName === "Sponsored Display Campaigns" && colAdGroupState){
+      const agState = lower(row[colAdGroupState]);
       if(agState === "" || agState === "paused") continue;
     }
 
-    // === Orders filter ===
+    // Orders filter
     const ordersVal = colOrders ? parseNumber(row[colOrders]) : NaN;
     if(!isNaN(ordersVal) && ordersVal > ordersMax) continue;
 
-    // === ACOS filter ===
+    // ACOS filter
     const acosVal = colACOS ? parseNumber(row[colACOS]) : NaN;
     if(!isNaN(acosVal) && acosVal < acosMin) continue;
 
-    // === Paused/State filters ===
+    // Paused/State filters
     if(colState && !isNotPaused(row[colState])) continue;
     if(colCampState && !isNotPaused(row[colCampState])) continue;
-    if(name==="SP Search Term Report" && colPT && lower(row["Match Type"])==="exact") continue;
+
+    // SP Search Term Report: skip exact match (case-insensitive)
+    if(canonicalName==="SP Search Term Report" && colPT && colMatchType){
+      const mt = lower(row[colMatchType]);
+      if(mt === "exact") continue;
+    }
 
     const r = {...row};
 
@@ -204,37 +247,57 @@ function filterAndSuggestSheet(name, df, ordersMax, acosMap, sugACOS, withSugges
     }
 
     // Percent formatting
-    if(colCTR && r[colCTR] !== ""){ let num=parseNumber(r[colCTR]); if(!isNaN(num)) r[colCTR] = num.toFixed(2) + "%"; }
-    if(colACOS && r[colACOS] !== ""){ let num=parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%"; }
-    if(colROAS && r[colROAS] !== ""){ let num=parseNumber(r[colROAS]); if(!isNaN(num)) r[colROAS] = (num*100).toFixed(2) + "%"; }
+    if(colCTR && r[colCTR] !== ""){
+      const num = parseNumber(r[colCTR]); if(!isNaN(num)) r[colCTR] = num.toFixed(2) + "%";
+    }
+    if(colACOS && r[colACOS] !== ""){
+      const num = parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%";
+    }
+    if(colROAS && r[colROAS] !== ""){
+      const num = parseNumber(r[colROAS]); if(!isNaN(num)) r[colROAS] = (num*100).toFixed(2) + "%";
+    }
 
     // Suggestions
     if(withSuggestions){
       if(!isNaN(acosVal)){
-        switch(name){
-          case "SP Search Term Report": case "SB Search Term Report": r["Suggestion"] = acosVal >= sugACOS ? "Negative exact" : "Leave"; break;
-          case "Sponsored Products Campaigns": case "Sponsored Display Campaigns": r["Suggestion"] = acosVal >= sugACOS ? "Pause" : "Leave"; break;
-          case "Sponsored Brands Campaigns": r["Suggestion"] = acosVal < sugACOS ? "Pause" : "Leave"; break;
+        switch(canonicalName){
+          case "SP Search Term Report":
+          case "SB Search Term Report":
+            r["Suggestion"] = acosVal >= sugACOS ? "Negative exact" : "Leave";
+            break;
+          case "Sponsored Products Campaigns":
+          case "Sponsored Display Campaigns":
+          case "Sponsored Brands Campaigns": // fixed to >=
+            r["Suggestion"] = acosVal >= sugACOS ? "Pause" : "Leave";
+            break;
         }
-      } else r["Suggestion"]="Leave";
+      } else {
+        r["Suggestion"] = "Leave";
+      }
     }
 
-    out.push(r);
+    // Canonicalize keys to output headers
+    const targetHeaders = COLS[canonicalName];
+    const rc = remapToCanonical(r, targetHeaders);
+    out.push(rc);
   }
   return out;
 }
 
 // Convert sheets
-function sheetToJSON(ws){ return XLSX.utils.sheet_to_json(ws,{defval:""}); }
+const sheetToJSON = ws => XLSX.utils.sheet_to_json(ws,{defval:""});
 function aoaToSheet(headers, rows, withSuggestions){
   const finalHeaders = withSuggestions ? headers : headers.filter(h=>h!=="Suggestion");
   return XLSX.utils.aoa_to_sheet([finalHeaders, ...rows.map(r=>finalHeaders.map(h=>r[h]??""))]);
 }
 
-// === Status ===
-function setStatus(text, ok=false){ const s=document.getElementById("status"), dot=document.getElementById("statusDot"), t=document.getElementById("statusText"); s.classList.remove("hidden"); t.textContent=text; dot.classList.toggle("ok",ok); }
+// Status
+function setStatus(text, ok=false){
+  const s=document.getElementById("status"), dot=document.getElementById("statusDot"), t=document.getElementById("statusText");
+  s.classList.remove("hidden"); t.textContent=text; dot.classList.toggle("ok",ok);
+}
 
-// === File Handling ===
+// File Handling
 const fileEl=document.getElementById("file");
 const ordersEl=document.getElementById("orders");
 const processBtn=document.getElementById("processBtn");
@@ -242,7 +305,14 @@ const downloadBtn=document.getElementById("downloadBtn");
 const resetBtn=document.getElementById("resetBtn");
 let outBlob=null;
 
-async function readFile(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=e=>resolve(XLSX.read(new Uint8Array(e.target.result),{type:'array'})); reader.onerror=reject; reader.readAsArrayBuffer(file); }); }
+async function readFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>resolve(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));
+    reader.onerror=reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 async function processFile(withSuggestions){
   const file=fileEl.files[0]; if(!file){alert("Please choose an .xlsx file."); return;}
@@ -258,16 +328,16 @@ async function processFile(withSuggestions){
 
   setStatus("Reading workbook…");
   let wb; try{wb=await readFile(file);}catch(e){console.error(e); setStatus("Failed to read file.",false); return;}
-  const outWB=XLSX.utils.book_new(); 
+  const outWB=XLSX.utils.book_new();
 
-  for(const name of SHTS){
-    const ws=wb.Sheets[name]; 
+  for(const canonicalName of SHTS){
+    const ws = getSheetInsensitive(wb, canonicalName); // case-insensitive
     const df = ws ? sheetToJSON(ws) : [];
-    setStatus(`Processing: ${name}…`);
-    const rows = filterAndSuggestSheet(name, df, ordersMax, acosMap, sugACOS, withSuggestions);
-    const headers = COLS[name];
+    setStatus(`Processing: ${canonicalName}…`);
+    const rows = filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, withSuggestions);
+    const headers = COLS[canonicalName];
     const sh = aoaToSheet(headers, rows, withSuggestions);
-    XLSX.utils.book_append_sheet(outWB, sh, name.substring(0,31));
+    XLSX.utils.book_append_sheet(outWB, sh, canonicalName.substring(0,31));
   }
 
   const outArray=XLSX.write(outWB,{bookType:'xlsx',type:'array'});
@@ -276,7 +346,7 @@ async function processFile(withSuggestions){
   setStatus("✅ Ready. Click download to save your file.",true);
 }
 
-// === Events ===
+// Events
 processBtn.addEventListener("click", () => {
   const withSuggestions = document.getElementById("includeSug").checked;
   processFile(withSuggestions);
@@ -285,8 +355,8 @@ processBtn.addEventListener("click", () => {
 downloadBtn.addEventListener("click", () => {
   if (!outBlob) return;
   const withSuggestions = document.getElementById("includeSug").checked;
-  const filename = withSuggestions 
-    ? "Bleeders 2.0 Output File with Suggestions.xlsx" 
+  const filename = withSuggestions
+    ? "Bleeders 2.0 Output File with Suggestions.xlsx"
     : "Bleeders 2.0 Output File.xlsx";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(outBlob);
@@ -303,7 +373,7 @@ resetBtn.addEventListener("click",()=>{
   document.getElementById("acos_SB").value=0.45;
   document.getElementById("acos_SBC").value=0.45;
   document.getElementById("acos_SD").value=0.45;
-  document.getElementById("sug_ACOS").value=0.5;
+  document.getElementById("sug_ACOS").value=0.8; // keep in sync with UI default
   document.getElementById("includeSug").checked = true;
   outBlob=null;
   document.getElementById("status").classList.add("hidden");
