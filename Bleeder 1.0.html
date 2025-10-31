@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bleeders 1.1 (case-insensitive)</title>
+  <title>Bleeders 1.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -360,7 +360,7 @@
     const outArray=XLSX.write(outWB,{bookType:"xlsx",type:"array"});
     const outBlob=new Blob([outArray],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const a=document.createElement("a");a.href=URL.createObjectURL(outBlob);
-    a.download="bleeders_1.1_output.xlsx";document.body.appendChild(a);a.click();
+    a.download="bleeders_1.0_output.xlsx";document.body.appendChild(a);a.click();
     setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
   });
 
@@ -371,3 +371,4 @@
 </script>
 </body>
 </html>
+
