@@ -486,7 +486,7 @@ if (usaRows.length > 0 && dataUpdateRows.length > 0) {
 
     // Clamp to 0–100 (UPDATED)
     if (newValue < 0) newValue = 0;
-    if (newValue > 100) newValue = 100;
+    if (newValue > 900) newValue = 900;
 
     // Only write if there’s an actual change, else keep blank
     if (changed && newValue !== base) {
