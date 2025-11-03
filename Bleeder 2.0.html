@@ -143,6 +143,19 @@ function parseNumber(val){
   const n = parseFloat(s);
   return isNaN(n) ? NaN : n;
 }
+
+// NEW: robust percentage formatter for CTR (keeps everything else unchanged)
+function formatPercent(val, decimals=2){
+  const raw = norm(val);
+  if(raw === "") return "";
+  const hasPct = /%/.test(raw);
+  const n = parseNumber(raw);
+  if (isNaN(n)) return raw;                   // leave non-numeric as-is
+  const v = hasPct ? n : (n <= 1 ? n*100 : n); // 0.123 -> 12.3 ; 12.3 -> 12.3
+  const s = v.toFixed(decimals).replace(/\.?0+$/,""); // trim trailing zeros
+  return s + "%";
+}
+
 // flexible, case-insensitive column finder
 function getColFlexible(rowObj, keywords){
   if(!rowObj) return null;
@@ -246,9 +259,9 @@ function filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, w
       if(colKeyword) delete r[colKeyword];
     }
 
-    // Percent formatting
+    // Percent formatting (CTR uses robust formatter; ACOS/ROAS left as originally designed)
     if(colCTR && r[colCTR] !== ""){
-      const num = parseNumber(r[colCTR]); if(!isNaN(num)) r[colCTR] = num.toFixed(2) + "%";
+      r[colCTR] = formatPercent(r[colCTR]); // <-- changed
     }
     if(colACOS && r[colACOS] !== ""){
       const num = parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%";
@@ -267,7 +280,7 @@ function filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, w
             break;
           case "Sponsored Products Campaigns":
           case "Sponsored Display Campaigns":
-          case "Sponsored Brands Campaigns": // fixed to >=
+          case "Sponsored Brands Campaigns":
             r["Suggestion"] = acosVal >= sugACOS ? "Pause" : "Leave";
             break;
         }
