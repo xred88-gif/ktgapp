@@ -148,6 +148,18 @@
   function toNumber(v){const s=norm(v).replace(/[^0-9.\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
   const isNotPaused = v => {const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";};
 
+  // NEW ➜ normalize CTR into a percentage string like "12.34%"
+  function formatPercent(v, decimals=2){
+    const raw = norm(v);
+    if(raw==="") return "";
+    const hasPct = /%/.test(raw);
+    const n = toNumber(raw);
+    if(isNaN(n)) return raw;           // if it's not numeric, keep original text
+    const val = hasPct ? n : (n <= 1 ? n*100 : n); // 0.12 -> 12 ; 12 -> 12 ; "12%" -> 12
+    const s = val.toFixed(decimals).replace(/\.?0+$/,""); // trim trailing zeros
+    return s + "%";
+  }
+
   // Case-insensitive sheet matching
   function normalizeSheetName(s){
     return lower(String(s)).replace(/\s+/g," ").trim();
@@ -212,7 +224,8 @@
           rowOut["Match Type"]=get(m,"Match Type");
           rowOut["Suggestion"]="";
           rowOut["Clicks"]=get(m,"Clicks");
-          rowOut["Click-through Rate"]=get(m,"Click-through Rate");
+          // ✳️ force CTR to percentage
+          rowOut["Click-through Rate"]=formatPercent(get(m,"Click-through Rate"));
           rowOut["CPC"]=get(m,"CPC");
           rowOut["Spend"]=get(m,"Spend");
           rowOut["Sales"]=get(m,"Sales");
@@ -280,7 +293,8 @@
           }
           rowOut["Suggestion"]="";
           rowOut["Clicks"]=get(m,"Clicks");
-          rowOut["Click-through Rate"]=get(m,"Click-through Rate");
+          // ✳️ force CTR to percentage
+          rowOut["Click-through Rate"]=formatPercent(get(m,"Click-through Rate"));
           rowOut["CPC"]=get(m,"CPC");
           rowOut["Spend"]=get(m,"Spend");
           rowOut["Sales"]=get(m,"Sales");
@@ -351,6 +365,7 @@
       json.forEach(r=>{
         const clicks=toNumber(r[colClicks]);
         r.Suggestion=clicks>=thr?(["SP Search Term Report","SB Search Term Report"].includes(name)?"Negative exact":"Pause"):"leave";
+        // CTR is already formatted during Step 1; no change needed here
       });
       const keepCols=COLS[name];
       const sh=aoaToSheet(keepCols,json,keepCols);
