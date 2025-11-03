@@ -145,12 +145,12 @@
   // ---------- utilities ----------
   const norm = v => v==null ? "" : String(v).trim();
   const lower = v => norm(v).toLowerCase();
-  function toNumber(v){const s=norm(v).replace(/[^0-9.\\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
+  function toNumber(v){const s=norm(v).replace(/[^0-9.\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
   const isNotPaused = v => {const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";};
 
   // Case-insensitive sheet matching
   function normalizeSheetName(s){
-    return lower(String(s)).replace(/\\s+/g," ").trim();
+    return lower(String(s)).replace(/\s+/g," ").trim();
   }
   function buildSheetMap(workbook){
     const map=new Map();
@@ -274,6 +274,10 @@
           if(sheetName.includes("Search Term")){
             rowOut["Customer Search Term"]=get(m,"Customer Search Term");
           }
+          // ✅ add Impressions for SP Search Term Report
+          if (sheetName === "SP Search Term Report") {
+            rowOut["Impressions"] = get(m, "Impressions");
+          }
           rowOut["Suggestion"]="";
           rowOut["Clicks"]=get(m,"Clicks");
           rowOut["Click-through Rate"]=get(m,"Click-through Rate");
@@ -371,4 +375,3 @@
 </script>
 </body>
 </html>
-
