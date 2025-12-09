@@ -259,16 +259,14 @@ function filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, w
       if(colKeyword) delete r[colKeyword];
     }
 
-    // Percent formatting (CTR uses robust formatter; ACOS/ROAS left as originally designed)
+    // Percent formatting (CTR uses robust formatter; ACOS formatted; ROAS preserved)
     if(colCTR && r[colCTR] !== ""){
-      r[colCTR] = formatPercent(r[colCTR]); // <-- changed
+      r[colCTR] = formatPercent(r[colCTR]);
     }
     if(colACOS && r[colACOS] !== ""){
       const num = parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%";
     }
-    if(colROAS && r[colROAS] !== ""){
-      const num = parseNumber(r[colROAS]); if(!isNaN(num)) r[colROAS] = (num*100).toFixed(2) + "%";
-    }
+    // ROAS is intentionally left untouched so it stays exactly as in the source file
 
     // Suggestions
     if(withSuggestions){
@@ -395,4 +393,3 @@ resetBtn.addEventListener("click",()=>{
 </script>
 </body>
 </html>
-
