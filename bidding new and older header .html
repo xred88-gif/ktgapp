@@ -116,9 +116,27 @@ function pick(row, names){
 }
 
 function toPct01(v){
-  let n = num(v);
+  if (v == null || v === '') return 0;
+
+  const raw = String(v).trim();
+
+  // If Amazon explicitly includes %, always treat as percent
+  if (raw.includes('%')) {
+    return num(raw) / 100;
+  }
+
+  const n = num(raw);
+
   if (!isFinite(n) || n <= 0) return 0;
-  return n >= 10 ? n/100 : n;
+
+  /*
+    Rules:
+    - n >= 1 and n <= 1000  → percent value (23.22, 232.22)
+    - n < 1                → already fraction (0.2322)
+  */
+  if (n >= 1) return n / 100;
+
+  return n;
 }
 
 const COLS = {
@@ -279,3 +297,4 @@ document.getElementById('proceed').addEventListener('click',proceed);
 </script>
 </body>
 </html>
+
