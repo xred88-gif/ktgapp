@@ -94,7 +94,6 @@ function formatDate(v){
   return isNaN(d) ? '' : d.toISOString().slice(0,10);
 }
 
-// universal numeric parser
 function num(v){
   if (v == null) return 0;
   if (typeof v === 'number') return v || 0;
@@ -107,31 +106,27 @@ function num(v){
   return isNaN(n) ? 0 : (neg ? -n : n);
 }
 
-// normalize text
 function normName(v){
   return String(v||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').replace(/["'’`]+/g,'').toLowerCase().trim();
 }
 
-// pick first non-empty among aliases
 function pick(row, names){
   for (const n of names) if(row && row[n] != null && row[n] !== '') return row[n];
   return '';
 }
 
-// Normalize percent-like inputs to 0–1 fraction
 function toPct01(v){
   let n = num(v);
   if (!isFinite(n) || n <= 0) return 0;
   return n >= 10 ? n/100 : n;
 }
 
-// Column aliases
 const COLS = {
   campaign: ['Campaigns','Campaign','Campaign Name','Campaign name','Campaign ID','Campaign Id','Campaign Title'],
   startDate: ['Start date','Start Date','Campaign start date','CampaignStartDate'],
   portfolio: ['Portfolio','Portifolio','Portfolio name'],
   budget: ['Budget','Campaign budget amount'],
-  spend: ['Spend','Spend (USD)','Cost','Total Spend','Attributed Spend'],
+  spend: ['Spend','Spend (USD)','Cost','Total Spend','Attributed Spend','Total cost','Total Cost'],
   orders: ['Orders','Purchases'],
   clicks: ['Clicks'],
   impressions: ['Impressions'],
@@ -139,7 +134,6 @@ const COLS = {
   acos: ['ACOS']
 };
 
-// getter helpers
 function getCampaign(row){ return pick(row,COLS.campaign); }
 function getStartDate(row){ return pick(row,COLS.startDate); }
 function getPortfolio(row){ return pick(row,COLS.portfolio); }
@@ -179,7 +173,6 @@ fileInput.addEventListener('change',()=>{
 
 function readFileAsync(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res({data:r.result,name:f.name});r.onerror=e=>rej(e);r.readAsArrayBuffer(f);});}
 
-// Auto-pick the sheet that has a Campaign column
 function readMultipleDaily(fs){
   return (async () => {
     const rows = [];
