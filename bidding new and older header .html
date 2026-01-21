@@ -97,11 +97,29 @@ function formatDate(v){
 function num(v){
   if (v == null) return 0;
   if (typeof v === 'number') return v || 0;
+
   let s = String(v).trim();
+
+  // Handle (123.45)
   let neg = false;
-  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (/^\(.*\)$/.test(s)) {
+    neg = true;
+    s = s.slice(1, -1);
+  }
+
+  // 🔥 FIX: normalize European decimals
+  // If comma is decimal separator (and dot is thousand)
+  if (s.includes(',') && !s.includes('.')) {
+    s = s.replace(',', '.');
+  } else if (s.includes(',') && s.includes('.')) {
+    // remove thousand separators
+    s = s.replace(/,/g, '');
+  }
+
+  // Strip everything except digits, dot, minus
   s = s.replace(/[^0-9.\-]/g, '');
   if (!s) return 0;
+
   const n = parseFloat(s);
   return isNaN(n) ? 0 : (neg ? -n : n);
 }
@@ -120,23 +138,19 @@ function toPct01(v){
 
   const raw = String(v).trim();
 
-  // If Amazon explicitly includes %, always treat as percent
+  // Explicit percent always wins
   if (raw.includes('%')) {
     return num(raw) / 100;
   }
 
   const n = num(raw);
-
   if (!isFinite(n) || n <= 0) return 0;
 
-  /*
-    Rules:
-    - n >= 1 and n <= 1000  → percent value (23.22, 232.22)
-    - n < 1                → already fraction (0.2322)
-  */
-  if (n >= 1) return n / 100;
-
-  return n;
+  // Amazon rules:
+  // 0–1      → already fraction
+  // 1–1000   → percent
+  if (n < 1) return n;
+  return n / 100;
 }
 
 const COLS = {
@@ -297,4 +311,5 @@ document.getElementById('proceed').addEventListener('click',proceed);
 </script>
 </body>
 </html>
+
 
