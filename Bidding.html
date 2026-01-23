@@ -141,6 +141,10 @@ function getStartDate(row){
 function getBudget(row){
   return pick(row, ['Budget','Campaign budget amount']);
 }
+function getOrders(row){
+  return pick(row, ['Orders','Purchases']);
+
+}
 
 // Normalize percent-like inputs to 0–1
 function toPct01(v){
@@ -244,14 +248,14 @@ async function proceed(){
         'Impressions_30days': num(r['Impressions']),
         'Clicks_30days': num(r['Clicks']),
         'Spend_30days': num(getSpend(r)),
-        'Orders_30days': num(r['Orders']),
+        'Orders_30days': num(getOrders(r)),
         'Sales_30days': num(r['Sales']),
         'ACOS_30days': toPct01(r['ACOS']),
         'Last 7 Days':'',
         'Impressions_7days': num(r7['Impressions']),
         'Clicks_7days': num(r7['Clicks']),
         'Spend_7days': num(getSpend(r7)),
-        'Orders_7days': num(r7['Orders']),
+        'Orders_7days': num(getOrders(r7)),
         'Sales_7days': num(r7['Sales']),
         'ACOS_7days': toPct01(r7['ACOS']),
         'Spent_DayBeforeYesterday': spendDB[k]||0,
