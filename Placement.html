@@ -180,7 +180,8 @@ async function proceed(){
         'Spent DB Yesterday':'','Spent Yesterday':'','Budget Check':'',
         'Last 30 days':'','Last 7 days':'','Yesterday':'',
         'Placement': r['Placement']||'',
-        'Percentage': r['Percentage']||0
+        'Percentage': r['Percentage']||0,
+        'Changes in placement': ''
       }));
       log('USA rows mapped with reserved columns: '+usaRows.length);
     } else log('Bulk30d file not provided');
@@ -200,6 +201,7 @@ async function proceed(){
       });
       return merged;
     }
+
     const rowsBulk7 = mergeRows(['Bulk7d']).filter(r=>{ const placement=getValueFromRow(r,['Placement']); const state=getValueFromRow(r,['Campaign State (Informational only)','Campaign State']); return placement!==undefined && String(placement).trim()!=='' && !(state!==undefined && String(state).toLowerCase().includes('paused')); });
     const rowsDayBefore = mergeRows(['DayBeforeYesterday']);
     const rowsYesterday = mergeRows(['Yesterday']);
@@ -236,11 +238,56 @@ async function proceed(){
     }
     log('data update total rows: '+dataUpdateRows.length);
 
+    // ---------- Calculate "Changes in placement" ----------
+    if(usaRows.length > 0 && dataUpdateRows.length > 0){
+        const dataMap = {};
+        dataUpdateRows.forEach(r=>{
+            const campaign = (r["Campaign Name_bulk7"] || '').trim().toLowerCase();
+            const placement = (r["Placement"] || '').trim().toLowerCase();
+            if(!campaign || !placement) return;
+            dataMap[campaign + "|" + placement] = {
+                acos: parseACOStoDecimal(r["ACOS"]),
+                spend: parseFloat(r["Spend_bulk7"] || 0),
+                orders: parseFloat(r["Orders"] || 0)
+            };
+        });
+
+        usaRows = usaRows.map(row=>{
+            const campaign = (row["Campaign Name (Informational only)"] || '').trim().toLowerCase();
+            const placement = (row["Placement"] || '').trim().toLowerCase();
+            const key = campaign + "|" + placement;
+            const update = dataMap[key] || {};
+            let base = parseFloat(row["Percentage"]);
+            if(isNaN(base)) base = 0;
+
+            let newValue = base;
+            let changed = false;
+            const acos = isNaN(update.acos)?0:update.acos;
+            const spend = isNaN(update.spend)?0:update.spend;
+            const orders = isNaN(update.orders)?0:update.orders;
+
+            if(spend > 10 && orders === 0){ newValue = base - 5; changed = true; }
+            else if(spend > 0 && orders === 0){ newValue = base + 5; changed = true; }
+            else if(spend === 0 && orders === 0){ newValue = base + 5; changed = true; }
+            else {
+                if(acos >= 0.7){ newValue = base - 5; changed = true; }
+                else if(acos >= 0.5){ newValue = base - 5; changed = true; }
+                else if(acos >= 0.2 && acos < 0.3){ newValue = base + 5; changed = true; }
+                else if(acos >= 0.1 && acos < 0.2){ newValue = base + 10; changed = true; }
+                else if(acos > 0 && acos < 0.1){ newValue = base + 15; changed = true; }
+            }
+
+            if(newValue < 0) newValue = 0;
+            if(newValue > 900) newValue = 900;
+            row["Changes in placement"] = changed ? Math.round(newValue*100)/100 : '';
+            return row;
+        });
+        log('✅ Changes in placement updated for USA tab');
+    }
+
     // ---------- TOS tab ----------
     const tosSources=[{key:'30dcampaigns',name:'30d'},{key:'7dcampaigns',name:'7d'},{key:'Yesterday',name:'yesterday'}];
-    let tosWideRows=[];
-    let maxTosRows=0;
-    let tosData={};
+    let tosWideRows=[]; let maxTosRows=0; let tosData={};
     for(const s of tosSources){
       tosData[s.name]=[];
       const wbs=workbooks[s.key];
@@ -260,11 +307,17 @@ async function proceed(){
     }
     for(let i=0;i<maxTosRows;i++){
       const row={};
-      for(let j=0;j<tosSources.length;j++){
-        const s=tosSources[j]; const r=tosData[s.name][i]||{};
-        row['Campaigns_'+s.name]=r['Campaigns']||'';
-        row[s.name+' TOS']=r['Top-of-search impression share']||0;
-      }
+      const r30 = tosData['30d'][i] || {};
+      row['Campaigns_30d'] = r30['Campaigns'] || '';
+      row['30d TOS'] = r30['Top-of-search impression share'] || 0;
+      row[''] = '';
+      const r7 = tosData['7d'][i] || {};
+      row['Campaigns_7d'] = r7['Campaigns'] || '';
+      row['7d TOS'] = r7['Top-of-search impression share'] || 0;
+      row[' '] = '';
+      const ry = tosData['yesterday'][i] || {};
+      row['Campaigns_yesterday'] = ry['Campaigns'] || '';
+      row['yesterday TOS'] = ry['Top-of-search impression share'] || 0;
       tosWideRows.push(row);
     }
     log('TOS wide total rows: '+tosWideRows.length);
