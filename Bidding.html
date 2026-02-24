@@ -125,33 +125,15 @@ function pick(row, names){
   return '';
 }
 
-// --- flexible header mapping ---
-function getCampaign(row){
-  return pick(row, ['Campaigns','Campaign','Campaign Name','Campaign name','Campaign ID','Campaign Id','Campaign Title']);
-}
-function getSpend(row){
-  return pick(row, ['Spend','Spend (USD)','Cost','Total Spend','Attributed Spend','Total cost']);
-}
-function getPortfolio(row){
-  return pick(row, ['Portfolio','Portifolio','Portfolio name']);
-}
-function getStartDate(row){
-  return pick(row, ['Start date','Start Date','Campaign start date','StartDate']);
-}
-function getBudget(row){
-  return pick(row, ['Budget','Campaign budget amount']);
-}
-function getOrders(row){
-  return pick(row, ['Orders','Purchases']);
+function getCampaign(row){ return pick(row, ['Campaigns','Campaign','Campaign Name','Campaign name','Campaign ID','Campaign Id','Campaign Title']); }
+function getSpend(row){ return pick(row, ['Spend','Spend (USD)','Cost','Total Spend','Attributed Spend','Total cost']); }
+function getPortfolio(row){ return pick(row, ['Portfolio','Portifolio','Portfolio name']); }
+function getStartDate(row){ return pick(row, ['Start date','Start Date','Campaign start date','StartDate']); }
+function getBudget(row){ return pick(row, ['Budget','Campaign budget amount']); }
+function getOrders(row){ return pick(row, ['Orders','Purchases']); }
 
-}
-
-// Normalize percent-like inputs to 0–1
-function toPct01(v){
-  let n = num(v);
-  if (!isFinite(n) || n <= 0) return 0;
-  return n >= 10 ? n/100 : n;
-}
+// === scale ACOS for output ===
+function scaledACOS(v){ return num(v) * 100; }
 
 const ROLES=['Campaigns 30 Days','Campaigns 7 Days','Day Before Yesterday','Yesterday'];
 const fileInput=document.getElementById('allFiles');
@@ -250,20 +232,17 @@ async function proceed(){
         'Spend_30days': num(getSpend(r)),
         'Orders_30days': num(getOrders(r)),
         'Sales_30days': num(r['Sales']),
-        'ACOS_30days': toPct01(r['ACOS']),
+        'ACOS_30days': scaledACOS(r['ACOS']),
         'Last 7 Days':'',
         'Impressions_7days': num(r7['Impressions']),
         'Clicks_7days': num(r7['Clicks']),
         'Spend_7days': num(getSpend(r7)),
         'Orders_7days': num(getOrders(r7)),
         'Sales_7days': num(r7['Sales']),
-        'ACOS_7days': toPct01(r7['ACOS']),
+        'ACOS_7days': scaledACOS(r7['ACOS']),
         'Spent_DayBeforeYesterday': spendDB[k]||0,
         'Spent_Yesterday': spendY[k]||0
       };
-
-      if (!(k in spendDB)) log(`No DBY spend found for: ${getCampaign(r)}`);
-      if (!(k in spendY)) log(`No Y spend found for: ${getCampaign(r)}`);
 
       const clicks7 = +row['Clicks_7days'],
             sales7  = +row['Sales_7days'],
@@ -271,10 +250,10 @@ async function proceed(){
 
       row['Budget Check'] = '';
       row['Lower bids for Bleeders w/ no Sales'] = (clicks7 >= TH.clicksNoSales && sales7 === 0) ? 'TRUE' : 'FALSE';
-      row['Lower bids for targets w/ ACOS higher than'] = (acos7 > TH.highAcos) ? TH.highAcos : '';
+      row['Lower bids for targets w/ ACOS higher than'] = (acos7 > TH.highAcos*100) ? TH.highAcos*100 : '';
       row['Increase bids to Targets w/ Low Clicks'] = (clicks7 < TH.lowClicks) ? '3%' : '';
-      row['Increase bids for Targets with good ACOS'] = (acos7 > 0 && acos7 <= TH.lowAcos) ? '3%' : '';
-      row['Crateria: Good ACOS'] = (acos7 > 0 && acos7 < TH.lowAcos) ? TH.lowAcos : '';
+      row['Increase bids for Targets with good ACOS'] = (acos7 > 0 && acos7 <= TH.lowAcos*100) ? '3%' : '';
+      row['Crateria: Good ACOS'] = (acos7 > 0 && acos7 < TH.lowAcos*100) ? TH.lowAcos*100 : '';
       row['Change Campaign Budget'] = r['Change Campaign Budget'] || '';
       out.push(row);
     });
@@ -285,16 +264,20 @@ async function proceed(){
     const headers=Object.keys(out[0]||{});
     const headerMap={}; headers.forEach((h,i)=>headerMap[h]=i);
 
-    function fmt(col){
+    // --- scaled ACOS formatted with % ---
+    function fmtScaledPct(col){
       if(!(col in headerMap))return;
       const c=XLSX.utils.encode_col(headerMap[col]);
       for(let R=1;R<=wsRange.e.r;R++){
         const a=c+(R+1);
         const cell=ws[a];
-        if(cell&&typeof cell.v==='number'){cell.t='n';cell.z='0.00%';}
+        if(cell && typeof cell.v==='number'){
+          cell.t='n';
+          cell.z='0.00"%"';
+        }
       }
     }
-    ['ACOS_30days','ACOS_7days','Lower bids for targets w/ ACOS higher than','Crateria: Good ACOS'].forEach(fmt);
+    ['ACOS_30days','ACOS_7days','Lower bids for targets w/ ACOS higher than','Crateria: Good ACOS'].forEach(fmtScaledPct);
 
     XLSX.utils.book_append_sheet(wb,ws,'Bidding');
     XLSX.writeFile(wb,'bidding.xlsx');
