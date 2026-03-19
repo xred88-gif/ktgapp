@@ -23,6 +23,7 @@
     button{ cursor:pointer; font-weight:700; letter-spacing: .2px; background: linear-gradient(90deg, #5a82ff, #7aa2ff); border: none; }
     button.secondary{ background: #18223a; font-weight:600; }
     .row{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .row3{ display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
     .mt{ margin-top: 14px; }
     .small{ font-size: 12px; color: var(--muted); }
     .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#0f1626; border:1px solid rgba(255,255,255,0.08); }
@@ -32,6 +33,22 @@
     .hidden{ display:none !important; }
     footer{ margin-top: 24px; color: var(--muted); font-size: 12px; text-align:center; }
     code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+
+    /* Basis toggle */
+    .basis-toggle{ display:flex; gap:8px; margin-top:6px; }
+    .basis-btn{
+      flex:1; padding:10px 8px; border-radius:10px; border:1px solid rgba(255,255,255,0.15);
+      background:#0f1626; color:var(--muted); font-size:13px; font-weight:600;
+      cursor:pointer; transition: all .15s; text-align:center;
+    }
+    .basis-btn.active{
+      background: rgba(122,162,255,0.15); border-color: var(--accent); color: var(--accent);
+    }
+    .basis-fields{ display:grid; gap:14px; margin-top:10px; }
+
+    /* Threshold field visibility */
+    .field-group{ transition: opacity .15s; }
+    .field-group.dimmed{ opacity:.35; pointer-events:none; }
   </style>
 </head>
 <body>
@@ -54,13 +71,31 @@
         </div>
       </div>
 
-      <div class="row mt hidden" id="suggestionRow">
-        <div>
-          <label for="clicksSug">Step 2: Enter clicks threshold for suggestions</label>
-          <input id="clicksSug" type="number" value="14" min="0" step="1" />
+      <!-- STEP 2: Suggestions -->
+      <div class="hidden" id="suggestionRow">
+        <div class="mt">
+          <label>Step 2: Suggestion basis — trigger suggestions when…</label>
+          <div class="basis-toggle">
+            <div class="basis-btn active" data-basis="clicks">Clicks only</div>
+            <div class="basis-btn" data-basis="spend">Spend only</div>
+            <div class="basis-btn" data-basis="both">Clicks OR Spend</div>
+          </div>
         </div>
-        <div>
-          <label>&nbsp;</label>
+
+        <div class="basis-fields mt">
+          <div class="row">
+            <div class="field-group" id="fgClicks">
+              <label for="clicksSug">Clicks threshold ≥</label>
+              <input id="clicksSug" type="number" value="5" min="0" step="1" />
+            </div>
+            <div class="field-group" id="fgSpend">
+              <label for="spendSug">Spend threshold ≥ ($)</label>
+              <input id="spendSug" type="number" value="10" min="0" step="10" />
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt">
           <button id="applySugBtn">📝 Apply Suggestions</button>
         </div>
       </div>
@@ -86,13 +121,12 @@
     </div>
 
     <footer>
-      KTG - 2025 - copyright © 2020 all rights reserved <code>KTG</code>
+      KTG - 2026 - copyright © 2026 all rights reserved <code>KTG</code>
     </footer>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
-  // Canonical columns to output (these headers will be written to the result)
   const COLS = {
     "SP Search Term Report": [
       "Campaign Name (Informational only)","Ad Group Name (Informational only)","Keyword / Product Targeting","Match Type","Suggestion","Customer Search Term",
@@ -115,7 +149,6 @@
     ]
   };
 
-  // Header aliases to tolerate capitalization/wording variants
   const ALIASES = new Map([
     ["campaign name (informational only)", ["campaign name (informational only)","campaign name (informational Only)","Campaign name (Informational only)"]],
     ["ad group name (informational only)", ["ad group name (informational only)","ad group name (Informational only)"]],
@@ -142,56 +175,41 @@
 
   const SHTS = Object.keys(COLS);
 
-  // ---------- utilities ----------
   const norm = v => v==null ? "" : String(v).trim();
   const lower = v => norm(v).toLowerCase();
   function toNumber(v){const s=norm(v).replace(/[^0-9.\-]/g,"");const n=parseFloat(s);return isNaN(n)?NaN:n;}
   const isNotPaused = v => {const s=lower(v);return !["paused","pause","stopped","disabled"].includes(s)&&s!=="";};
 
-  // NEW ➜ normalize CTR into a percentage string like "12.34%"
   function formatPercent(v, decimals=2){
     const raw = norm(v);
     if(raw==="") return "";
     const hasPct = /%/.test(raw);
     const n = toNumber(raw);
-    if(isNaN(n)) return raw;           // if it's not numeric, keep original text
-    const val = hasPct ? n : (n <= 1 ? n*100 : n); // 0.12 -> 12 ; 12 -> 12 ; "12%" -> 12
-    const s = val.toFixed(decimals).replace(/\.?0+$/,""); // trim trailing zeros
+    if(isNaN(n)) return raw;
+    const val = hasPct ? n : (n <= 1 ? n*100 : n);
+    const s = val.toFixed(decimals).replace(/\.?0+$/,"");
     return s + "%";
   }
 
-  // Case-insensitive sheet matching
-  function normalizeSheetName(s){
-    return lower(String(s)).replace(/\s+/g," ").trim();
-  }
+  function normalizeSheetName(s){ return lower(String(s)).replace(/\s+/g," ").trim(); }
   function buildSheetMap(workbook){
     const map=new Map();
-    for(const realName of workbook.SheetNames){
-      map.set(normalizeSheetName(realName), realName);
-    }
+    for(const realName of workbook.SheetNames){ map.set(normalizeSheetName(realName), realName); }
     return map;
   }
-  function findSheetName(sheetMap, target){
-    return sheetMap.get(normalizeSheetName(target)) || null;
-  }
+  function findSheetName(sheetMap, target){ return sheetMap.get(normalizeSheetName(target)) || null; }
 
-  // Build a case-insensitive key map for a row
   function keyMap(row){
     const m=new Map();
-    for(const k of Object.keys(row)){
-      m.set(lower(k), row[k]);
-    }
+    for(const k of Object.keys(row)){ m.set(lower(k), row[k]); }
     return m;
   }
   function get(rowMap, canonical){
     const wanted = lower(canonical);
     if(rowMap.has(wanted)) return rowMap.get(wanted);
     const aliasList = ALIASES.get(wanted) || [];
-    for(const cand of aliasList){
-      const k = lower(cand);
-      if(rowMap.has(k)) return rowMap.get(k);
-    }
-    return ""; // default empty if not found
+    for(const cand of aliasList){ const k = lower(cand); if(rowMap.has(k)) return rowMap.get(k); }
+    return "";
   }
 
   function combineKeywordAndTarget(rowMap){
@@ -224,7 +242,6 @@
           rowOut["Match Type"]=get(m,"Match Type");
           rowOut["Suggestion"]="";
           rowOut["Clicks"]=get(m,"Clicks");
-          // ✳️ force CTR to percentage
           rowOut["Click-through Rate"]=formatPercent(get(m,"Click-through Rate"));
           rowOut["CPC"]=get(m,"CPC");
           rowOut["Spend"]=get(m,"Spend");
@@ -234,7 +251,7 @@
           out.push(rowOut);
         }
       }
-    } 
+    }
     else if(sheetName==="Sponsored Display Campaigns"){
       for(const row of df){
         const m=keyMap(row);
@@ -246,9 +263,9 @@
         const sales=toNumber(get(m,"Sales"));
         const entityOk=["audience targeting","campaign","contextual targeting"].includes(entity);
         const enabled=state==="enabled"&&campaignState==="enabled";
-        const clicksOk=clicks>9; // original logic
+        const clicksOk=clicks>9;
         const noSales=sales===0;
-        const adGroupOk=adGroupState!==""; 
+        const adGroupOk=adGroupState!=="";
         if(entityOk&&enabled&&clicksOk&&noSales&&adGroupOk){
           const rowOut={};
           rowOut["Campaign Name (Informational only)"]=get(m,"Campaign Name (Informational only)");
@@ -264,7 +281,7 @@
           out.push(rowOut);
         }
       }
-    } 
+    }
     else {
       for(const row of df){
         const m=keyMap(row);
@@ -272,42 +289,28 @@
         const campOk=isNotPaused(get(m,"Campaign State (Informational only)"));
         const clicks=toNumber(get(m,"Clicks"));
         const sales=toNumber(get(m,"Sales"));
-        // Skip rows where Match Type is Exact in SP Search Term Report
-        if(sheetName === "SP Search Term Report" && lower(get(m,"Match Type")) === "exact") {
-          continue;
-        }
+        if(sheetName === "SP Search Term Report" && lower(get(m,"Match Type")) === "exact") continue;
         if(stateOk && campOk && clicks>clicksThreshold && Math.abs(sales)<1e-6){
           const rowOut={};
           rowOut["Campaign Name (Informational only)"]=get(m,"Campaign Name (Informational only)");
           rowOut["Ad Group Name (Informational only)"]=get(m,"Ad Group Name (Informational only)");
           rowOut["Keyword / Product Targeting"]=combineKeywordAndTarget(m);
-          if(true){ // allow Match Type on Sponsored Brands Campaigns too
-            rowOut["Match Type"]=get(m,"Match Type");
-          }
-          if(sheetName.includes("Search Term")){
-            rowOut["Customer Search Term"]=get(m,"Customer Search Term");
-          }
-          // ✅ add Impressions for SP Search Term Report
-          if (sheetName === "SP Search Term Report") {
-            rowOut["Impressions"] = get(m, "Impressions");
-          }
+          rowOut["Match Type"]=get(m,"Match Type");
+          if(sheetName.includes("Search Term")){ rowOut["Customer Search Term"]=get(m,"Customer Search Term"); }
+          if (sheetName === "SP Search Term Report") { rowOut["Impressions"] = get(m, "Impressions"); }
           rowOut["Suggestion"]="";
           rowOut["Clicks"]=get(m,"Clicks");
-          // ✳️ force CTR to percentage
           rowOut["Click-through Rate"]=formatPercent(get(m,"Click-through Rate"));
           rowOut["CPC"]=get(m,"CPC");
           rowOut["Spend"]=get(m,"Spend");
           rowOut["Sales"]=get(m,"Sales");
           rowOut["ACOS"]=get(m,"ACOS");
-          if(sheetName!=="Sponsored Display Campaigns"){
-            rowOut["ROAS"]=get(m,"ROAS");
-          }
+          if(sheetName!=="Sponsored Display Campaigns"){ rowOut["ROAS"]=get(m,"ROAS"); }
           rowOut["Orders"]=get(m,"Orders");
           out.push(rowOut);
         }
       }
     }
-
     return {rows:out,headers:keepCols};
   }
 
@@ -318,10 +321,41 @@
   function readFile(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:"array"}));}catch(err){rej(err);}};fr.onerror=rej;fr.readAsArrayBuffer(file);});}
   function sheetToJSON(ws){return XLSX.utils.sheet_to_json(ws,{defval:""});}
   function setStatus(t,ok=false){const s=document.getElementById("status");const d=document.getElementById("statusDot");const tx=document.getElementById("statusText");s.classList.remove("hidden");tx.textContent=t;d.classList.toggle("ok",ok);}
-  
+
+  // ---- Basis toggle ----
+  let currentBasis = "clicks"; // "clicks" | "spend" | "both"
+
+  const basisBtns = document.querySelectorAll(".basis-btn");
+  const fgClicks = document.getElementById("fgClicks");
+  const fgSpend = document.getElementById("fgSpend");
+
+  function updateBasisUI(){
+    basisBtns.forEach(b => b.classList.toggle("active", b.dataset.basis === currentBasis));
+    fgClicks.classList.toggle("dimmed", currentBasis === "spend");
+    fgSpend.classList.toggle("dimmed", currentBasis === "clicks");
+  }
+
+  basisBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentBasis = btn.dataset.basis;
+      updateBasisUI();
+    });
+  });
+
+  // ---- Suggestion logic ----
+  function shouldSuggest(clicks, spend, basis, clicksThr, spendThr){
+    const clicksOk = clicks >= clicksThr;
+    const spendOk  = spend  >= spendThr;
+    if(basis === "clicks") return clicksOk;
+    if(basis === "spend")  return spendOk;
+    if(basis === "both")   return clicksOk || spendOk;
+    return false;
+  }
+
   const fileEl=document.getElementById("file"),
         clicksEl=document.getElementById("clicks"),
         clicksSugEl=document.getElementById("clicksSug"),
+        spendSugEl=document.getElementById("spendSug"),
         processBtn=document.getElementById("processBtn"),
         applySugBtn=document.getElementById("applySugBtn"),
         downloadBtn=document.getElementById("downloadBtn"),
@@ -334,10 +368,7 @@
     const thr=Number(clicksEl.value||0);setStatus("Reading workbook…");
     let inWB;
     try{inWB=await readFile(file);}catch(e){console.error(e);setStatus("Failed to read file.");return;}
-
-    // Build map of real sheet names (case-insensitive)
     const sheetMap = buildSheetMap(inWB);
-
     const newWB=XLSX.utils.book_new();
     for(const name of SHTS){
       const realName = findSheetName(sheetMap, name);
@@ -357,16 +388,23 @@
 
   applySugBtn.addEventListener("click",()=>{
     if(!outWB){alert("No workbook loaded.");return;}
-    const thr=Number(clicksSugEl.value||0);
+    const clicksThr = Number(clicksSugEl.value||0);
+    const spendThr  = Number(spendSugEl.value||0);
+
     for(const name of SHTS){
-      const ws=outWB.Sheets[name];if(!ws)continue;
-      const json=sheetToJSON(ws);if(!json.length)continue;
-      const colClicks="Clicks";
+      const ws=outWB.Sheets[name]; if(!ws) continue;
+      const json=sheetToJSON(ws); if(!json.length) continue;
+
       json.forEach(r=>{
-        const clicks=toNumber(r[colClicks]);
-        r.Suggestion=clicks>=thr?(["SP Search Term Report","SB Search Term Report"].includes(name)?"Negative exact":"Pause"):"leave";
-        // CTR is already formatted during Step 1; no change needed here
+        const clicks = toNumber(r["Clicks"]);
+        const spend  = toNumber(r["Spend"]);
+        if(shouldSuggest(clicks, spend, currentBasis, clicksThr, spendThr)){
+          r.Suggestion = (["SP Search Term Report","SB Search Term Report"].includes(name)) ? "Negative exact" : "Pause";
+        } else {
+          r.Suggestion = "leave";
+        }
       });
+
       const keepCols=COLS[name];
       const sh=aoaToSheet(keepCols,json,keepCols);
       outWB.Sheets[name]=sh;
@@ -384,7 +422,8 @@
   });
 
   resetBtn.addEventListener("click",()=>{
-    fileEl.value="";clicksEl.value=9;clicksSugEl.value=14;outWB=null;
+    fileEl.value="";clicksEl.value=9;clicksSugEl.value=5;spendSugEl.value=10;outWB=null;
+    currentBasis="clicks"; updateBasisUI();
     suggestionRow.classList.add("hidden");downloadBtn.classList.add("hidden");resetBtn.classList.add("hidden");document.getElementById("status").classList.add("hidden");
   });
 </script>
