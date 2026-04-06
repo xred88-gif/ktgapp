@@ -32,6 +32,7 @@
       background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
       border-right:1px solid var(--border);
       padding:18px 14px;
+      overflow-y: auto;
     }
     .brand{
       display:flex; align-items:center; gap:10px; padding:6px 10px; margin-bottom:12px;
@@ -40,22 +41,42 @@
     .badge{ font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
 
     .nav{
-      display:flex; flex-direction:column; gap:8px; margin-top:16px;
+      display:flex; flex-direction:column; gap:6px; margin-top:4px;
     }
     .nav a{
       display:flex; align-items:center; gap:10px;
       text-decoration:none; color:var(--ink);
       background: var(--panel-2);
-      padding:10px 12px; border-radius:12px; border:1px solid var(--border);
-      font-weight:600;
+      padding:9px 12px; border-radius:10px; border:1px solid var(--border);
+      font-weight:600; font-size:13.5px;
       transition: transform .06s ease, border-color .12s ease, box-shadow .12s ease;
     }
     .nav a:hover{ transform: translateY(-1px); border-color:rgba(122,162,255,.55); box-shadow:0 4px 18px rgba(0,0,0,.25); }
     .nav a.active{ outline:2px solid rgba(122,162,255,.35); }
-    .nav small{ color:var(--muted); font-weight:500; }
+    .nav a .icon{ font-size:14px; flex-shrink:0; }
+    .nav a .sub-label{ font-size:11px; color:var(--muted); font-weight:400; margin-left:auto; }
+
+    /* Sub-items (indented) */
+    .nav.sub a{
+      margin-left:14px;
+      background: rgba(255,255,255,0.025);
+      border-left: 2px solid rgba(122,162,255,.2);
+      border-radius:8px;
+      padding:7px 10px;
+      font-size:13px;
+      font-weight:500;
+    }
+    .nav.sub a:hover{ border-left-color: rgba(122,162,255,.7); }
 
     .spacer{ height:10px; }
-    .section-label{ color:var(--muted); font-size:12px; letter-spacing:.4px; margin:12px 6px 6px; }
+    .section-label{
+      color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.7px;
+      text-transform:uppercase; margin:14px 6px 5px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .section-label::after{
+      content:''; flex:1; height:1px; background:var(--border);
+    }
 
     .main{
       display:grid; grid-template-rows: 56px 1fr;
@@ -98,22 +119,32 @@
         <h1>KTG Toolkit</h1>
       </div>
 
+      <!-- Home -->
       <div class="section-label">Home</div>
       <nav class="nav" id="nav">
-        <a href="#home" data-src="index1.html"><span>🏠</span> Home</a>
+        <a href="#home" data-src="index1.html"><span class="icon">🏠</span> Home</a>
       </nav>
 
-      <div class="section-label">Reports</div>
-      <nav class="nav">
-        <a href="#bidding" data-src="Bidding.html"><span>📈</span> Bidding</a>
-        <a href="#placement" data-src="Placement.html"><span>📌</span> Placement</a>
+      <!-- Reports Creation -->
+      <div class="section-label">Reports Creation</div>
+      <nav class="nav sub">
+        <a href="#rc-bleeder1" data-src="Bleeder%201.0.html"><span class="icon">🩸</span> Bleeders 1.0</a>
+        <a href="#rc-bleeder2" data-src="Bleeder%202.0.html"><span class="icon">🩸</span> Bleeders 2.0</a>
+        <a href="#rc-bidding" data-src="Bidding.html"><span class="icon">📈</span> Bidding</a>
+        <a href="#rc-placement" data-src="Placement.html"><span class="icon">📌</span> Placement</a>
       </nav>
 
-      <div class="section-label">Bleeders</div>
-      <nav class="nav">
-        <a href="#bleeder1" data-src="Bleeder%201.0.html"><span>🩸</span> Bleeder 1.0</a>
-        <a href="#bleeder2" data-src="Bleeder%202.0.html"><span>🩸</span> Bleeder 2.0</a>
+      <!-- Reports Optimization -->
+      <div class="section-label">Reports Optimization</div>
+      <nav class="nav sub">
+        <a href="#ro-bleeder1" data-src="Bleeders_optimzer.html"><span class="icon">🩸</span> Bleeders</a>
+        <a href="#ro-bleeder-opt" data-src="https://docs.google.com/spreadsheets/d/1f4EtM2-5_-4ul1ZT8PXV5LG08H9S_Htx/edit?usp=sharing&ouid=114031016810513687709&rtpof=true&sd=true"><span class="icon">📋</span> Bleeders Optimization Template</a>
+        <a href="#ro-bidding" data-src="bidding-optimizer.html"><span class="icon">📈</span> Bidding</a>
+        <a href="#ro-bidding-opt" data-src="https://docs.google.com/spreadsheets/d/16DQi4UCANu5fwsdhvlsh6PmAFQdV_orT/edit?usp=drive_link&ouid=114031016810513687709&rtpof=true&sd=true"><span class="icon">📋</span> Optimization Template</a>
+        <a href="#ro-placement" data-src="placement_optimizer.html"><span class="icon">📌</span> Placement</a>
+        <a href="#ro-placement-opt" data-src="https://docs.google.com/spreadsheets/d/1e303TY9Sg-QMaKGJKPCJdRdZn4uBetDi/edit?usp=sharing&ouid=114031016810513687709&rtpof=true&sd=true"><span class="icon">📋</span> Optimization Template</a>
       </nav>
+
     </aside>
 
     <main class="main">
@@ -134,17 +165,25 @@
     const navLinks = document.querySelectorAll('a[data-src]');
     const frame = document.getElementById('frame');
     const titleEl = document.getElementById('title');
-    const statusPill = document.getElementById('statusPill');
     const openBtn = document.getElementById('openTab');
-    const toggleBtn = document.getElementById('toggleBtn');
 
-    // route map (hash -> [title, src])
+    // route map (hash -> {title, src})
     const routes = {
-      home: { title: 'Home', src: 'index1.html' },
-      bidding: { title: 'Bidding', src: 'Bidding.html' },
-      placement: { title: 'Placement', src: 'Placement.html' },
-      bleeder1: { title: 'Bleeder 1.0', src: 'Bleeder%201.0.html' },
-      bleeder2: { title: 'Bleeder 2.0', src: 'Bleeder%202.0.html' }
+      'home':           { title: 'Home',                            src: 'index1.html' },
+
+      // Reports Creation
+      'rc-bleeder1':    { title: 'Bleeders 1.0',                   src: 'Bleeder%201.0.html' },
+      'rc-bleeder2':    { title: 'Bleeders 2.0',                   src: 'Bleeder%202.0.html' },
+      'rc-bidding':     { title: 'Bidding',                        src: 'Bidding.html' },
+      'rc-placement':   { title: 'Placement',                      src: 'Placement.html' },
+
+      // Reports Optimization
+      'ro-bleeder1':    { title: 'Bleeders',                        src: 'Bleeder%201.0.html' },
+      'ro-bleeder-opt': { title: 'Bleeders Optimization Template', src: 'Bleeder%20Optimization%20Template.html' },
+      'ro-bidding':     { title: 'Bidding',                        src: 'Bidding.html' },
+      'ro-bidding-opt': { title: 'Bidding Optimization Template',  src: 'Bidding%20Optimization%20Template.html' },
+      'ro-placement':   { title: 'Placement',                      src: 'Placement.html' },
+      'ro-placement-opt':{ title: 'Placement Optimization Template',src: 'Placement%20Optimization%20Template.html' },
     };
 
     function setActive(hash){
@@ -158,23 +197,13 @@
       titleEl.textContent = r.title;
       openBtn.onclick = () => window.open(r.src, '_blank');
       setActive(key);
-      // close sidebar on mobile
       if (window.innerWidth <= 900) sidebar.classList.remove('open');
     }
 
     // initial route
-    load((location.hash||'#home').replace('#',''));
+    load((location.hash || '#home').replace('#', ''));
 
-    window.addEventListener('hashchange', () => load(location.hash.replace('#','')));
-
-    frame.addEventListener('load', () => {
-      statusPill.textContent = 'Loaded';
-      statusPill.style.color = '#9fb0d3';
-    });
-
-    toggleBtn.addEventListener('click', () => {
-      sidebar.classList.toggle('open');
-    });
+    window.addEventListener('hashchange', () => load(location.hash.replace('#', '')));
   </script>
 </body>
 </html>
