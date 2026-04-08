@@ -436,6 +436,15 @@ var G={
 function S(v){ return String(v==null?'':v).trim(); }
 function N(v){ return S(v).toLowerCase(); }
 function NW(v){ return N(v).replace(/\s+/g,' ').trim(); }
+// Normalize a term for lookup: collapse whitespace, replace curly/smart quotes with straight quotes
+function NT(v){
+  return NW(v)
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g,"'")  // curly single quotes → '
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g,'"')  // curly double quotes → "
+    .replace(/\s*=\s*/g,'=')      // spaces around = sign
+    .replace(/"\s+/g,'"')         // space after opening quote
+    .replace(/\s+"/g,'"');        // space before closing quote
+}
 function esc(s){ return S(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function show(id){ document.getElementById(id).classList.remove('hidden'); }
 function hide(id){ document.getElementById(id).classList.add('hidden'); }
@@ -725,10 +734,13 @@ function buildLookup(srcRows,defLabel){
     var row=srcRows[r];
     if(!row||!row.some(function(c){return S(c);})) continue;
 
-    // Skip Campaign-level and Ad Group-level rows
+    // Skip rows that should not be matched against:
+    // Campaign, Ad Group, Bidding Adjustment (placement rows), and Negative rows
     if(C.entity>=0){
       var rowEntity=N(S(row[C.entity]));
       if(rowEntity==='campaign'||rowEntity==='ad group') continue;
+      if(rowEntity==='bidding adjustment') continue;
+      if(rowEntity.indexOf('negative')!==-1) continue;
     }
 
     var rec={
@@ -802,14 +814,23 @@ function buildLookup(srcRows,defLabel){
       roasVC:        cell(row,C.roasVC)
     };
 
-    var c  = NW(rec.campName);
-    var a  = NW(rec.adgName);
-    var mt = NW(rec.matchType);
+    var c  = NT(rec.campName);
+    var a  = NT(rec.adgName);
+    var mt = NT(rec.matchType);
 
     // Collect all possible term values from source
     var terms=[];
-    [NW(rec.custST),NW(rec.kwText),NW(rec.ptExpr),NW(rec.resolvedPt),NW(rec.sdTargetExpr),NW(rec.sdResolvedTE)].forEach(function(t){
+    [NT(rec.custST),NT(rec.kwText),NT(rec.ptExpr),NT(rec.resolvedPt),NT(rec.sdTargetExpr),NT(rec.sdResolvedTE)].forEach(function(t){
       if(t&&terms.indexOf(t)===-1) terms.push(t);
+    });
+    // Also index formatted PT expression and bare ASIN variants
+    [rec.ptExpr,rec.resolvedPt,rec.sdTargetExpr,rec.sdResolvedTE].forEach(function(raw){
+      if(!raw) return;
+      var fmt=NT(formatPtExpr(raw));
+      if(fmt&&terms.indexOf(fmt)===-1) terms.push(fmt);
+      // Bare ASIN — strip asin="..." wrapper for reverse lookup
+      var m=String(raw).trim().toLowerCase().match(/^asin=["'\u201C\u201D]?([a-z0-9]+)["'\u201C\u201D]?$/);
+      if(m){ var bare=m[1]; if(terms.indexOf(bare)===-1) terms.push(bare); }
     });
 
     if(!c&&!a&&terms.length===0) continue;
@@ -918,10 +939,16 @@ function buildNegSet(srcRows){
 // Priority: most specific (quad) → least specific (camp alone)
 // ═══════════════════════════════════════════════════════════════════════════
 function findRec(lkp,campName,adgName,term,matchType){
-  var c  = NW(campName);
-  var a  = NW(adgName);
-  var t  = NW(term);
-  var mt = NW(matchType||'');
+  var c  = NT(campName);
+  var a  = NT(adgName);
+  var t  = NT(term);
+  // Also try the term as a formatted PT expression (e.g. bare ASIN → asin="b0xxxxx")
+  var tAlt = '';
+  if(t){
+    var tFmt = NT(formatPtExpr(term));
+    if(tFmt !== t) tAlt = tFmt;
+  }
+  var mt = NT(matchType||'');
   var r;
 
   function hasKwData(rec){
@@ -940,6 +967,13 @@ function findRec(lkp,campName,adgName,term,matchType){
   if(t&&mt){       r=lkp.bySingle['kw:'+t+'||mt:'+mt];      if(r) return {rec:r,how:'T5:kw+mt'}; }
   // T6: term alone
   if(t){           r=lkp.bySingle[t];                        if(r) return {rec:r,how:'T6:single'}; }
+  // T6b: try formatted PT expression variant (e.g. bare ASIN → asin="b0...")
+  if(tAlt){
+    if(c&&a){ r=lkp.byTriple[c+'||'+a+'||'+tAlt+'||'+mt]; if(r) return {rec:r,how:'T6b:quad-alt'}; }
+    if(c&&a){ r=lkp.byTriple[c+'||'+a+'||'+tAlt];          if(r) return {rec:r,how:'T6b:triple-alt'}; }
+    if(c){    r=lkp.byDouble[c+'||'+tAlt];                  if(r) return {rec:r,how:'T6b:double-alt'}; }
+    r=lkp.bySingle[tAlt]; if(r) return {rec:r,how:'T6b:single-alt'};
+  }
   // T7: camp + adg + matchType
   if(c&&a&&mt){ r=lkp.byCampAdg[c+'||'+a+'||mt:'+mt]; if(r&&hasKwData(r)) return {rec:r,how:'T7:camp+adg+mt'}; }
   // T8: camp + matchType
@@ -1602,10 +1636,14 @@ function processAll(){
 function doProcess(){
   DEFS.forEach(function(d){ G.buckets[d.id].rows=[]; });
   REDUCE_DEFS.forEach(function(d){ G.reduceBuckets[d.id].rows=[]; });
-  var counts={total:0,negExact:0,negPhrase:0,negPt:0,pause:0,reduceBid:0,skipped:0,matched:0,noMatch:0,skippedDupNeg:0};
+  var counts={total:0,negExact:0,negPhrase:0,negPt:0,pause:0,reduceBid:0,skipped:0,matched:0,noMatch:0,skippedDupNeg:0,skippedDup:0};
   var prev=[['Tab','A:Campaign','B:AdGroup','C/F:Term','Action',
              'Found?','How','Entity','CampID','AdGrpID','KwID','PTID',
              '→KwText','→MatchType','→PTExpr','→Bid (was→new)']];
+  // Dedup sets: one per output bucket (defId → Set of row keys)
+  var seenKeys={};
+  DEFS.forEach(function(d){ seenKeys[d.id]={}; });
+  REDUCE_DEFS.forEach(function(d){ seenKeys[d.id]={}; });
 
   G.slots.forEach(function(slot){
     var def =slot.def;
@@ -1703,11 +1741,19 @@ function doProcess(){
       }
 
       var outRow = buildOutputRow(def, rec, action, term, campName, adgName, reducePct);
+      // Deduplicate output rows using a key: campName + adgName + term + action + matchType
+      var rowKey = NW(campName)+'||'+NW(adgName)+'||'+NW(term)+'||'+action+'||'+NW(bleederMatchType);
       // Reduce-bid rows go to their own separate bucket; all other actions go to the regular bucket
       if(action==='reduce_bid'){
         var rbId = def.id+'_reduce';
-        if(G.reduceBuckets[rbId]) G.reduceBuckets[rbId].rows.push(outRow);
+        if(G.reduceBuckets[rbId]){
+          if(seenKeys[rbId][rowKey]){ counts.skippedDup++; counts.skipped++; continue; }
+          seenKeys[rbId][rowKey]=true;
+          G.reduceBuckets[rbId].rows.push(outRow);
+        }
       } else {
+        if(seenKeys[def.id][rowKey]){ counts.skippedDup++; counts.skipped++; continue; }
+        seenKeys[def.id][rowKey]=true;
         G.buckets[def.id].rows.push(outRow);
       }
       counts.total++;
@@ -1759,7 +1805,8 @@ function showResults(counts,prev){
     {l:'💰 Bid Reduced', n:counts.reduceBid,   c:'green'},
     {l:'✓ Matched',  n:counts.matched,         c:'green'},
     {l:'✗ No Match', n:counts.noMatch,         c:''},
-    {l:'⛔ Dup Neg Skipped', n:counts.skippedDupNeg, c:'yellow'}
+    {l:'⛔ Dup Neg Skipped', n:counts.skippedDupNeg, c:'yellow'},
+    {l:'⛔ Dup Row Skipped', n:counts.skippedDup,    c:'yellow'}
   ].map(function(s){
     return '<div class="stat '+s.c+'"><div class="stat-num">'+s.n+'</div><div class="stat-label">'+s.l+'</div></div>';
   }).join('');
