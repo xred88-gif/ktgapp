@@ -292,6 +292,7 @@
           <li>• No keywords meet click / ACOS / order thresholds</li>
           <li>• Rows were filtered (state not enabled, bid blank, etc.)</li>
         </ul>
+        <div id="noResultsDiag" style="margin-top:1.5rem;text-align:left;"></div>
       </div>
 
       <!-- Has results -->
@@ -319,6 +320,12 @@
         <!-- Individual file cards -->
         <div id="resultCards" style="display:flex;flex-direction:column;gap:0.75rem;margin-bottom:1.5rem;"></div>
 
+        <!-- Diagnostics -->
+        <details style="margin-bottom:1.5rem;">
+          <summary style="color:#64748b;font-size:0.8rem;cursor:pointer;padding:0.5rem;background:rgba(30,41,59,0.4);border-radius:0.5rem;">🔍 Processing Diagnostics (click to expand)</summary>
+          <div id="diagPanel" style="margin-top:0.5rem;background:rgba(15,23,42,0.6);border-radius:0.5rem;padding:1rem;font-size:0.75rem;color:#94a3b8;font-family:monospace;white-space:pre-wrap;max-height:20rem;overflow-y:auto;"></div>
+        </details>
+
         <!-- Preview -->
         <div id="previewPanel" class="card hidden">
           <h3 style="color:#fff;font-weight:600;margin:0 0 0.75rem;" id="previewTitle"></h3>
@@ -342,6 +349,7 @@ let downloadLinks = [];
 let zipObjectURL = null;
 let previewResult = null;
 let currentStep = 1;
+let processingLog = [];
 
 // ═══════════════════════════════════════════════════════════════
 // UTILITIES
@@ -376,8 +384,15 @@ function parseNumVal(val) {
 }
 function parseAcos(val) {
   if (val === undefined || val === null || val === '') return 0;
-  const n = parseFloat(String(val).replace('%',''));
-  return isNaN(n) ? 0 : n;
+  let s = String(val).trim();
+  const isPercent = s.endsWith('%');
+  if (isPercent) s = s.slice(0, -1);
+  const n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  // Amazon bulk files ALWAYS store ACOS as a decimal fraction (e.g. 0.85 = 85%, 1.1735 = 117.35%).
+  // Only skip multiplication if the value already looks like a whole percentage (e.g. "85%" with a % sign).
+  if (!isPercent) return n * 100;
+  return n;
 }
 function round2(n) { return Math.round(n * 100) / 100; }
 
@@ -393,15 +408,17 @@ function parseTemplate(workbook) {
     if (!row || !row[0]) continue;
     const campaign = String(row[0] || '').trim();
     if (!campaign) continue;
+    const rawV = row[21], rawW = row[22], rawX = row[23], rawY = row[24];
     rows.push({
       campaign,
       bleeders:      parseBool(row[20]),
-      minAcos:       parseNum(row[21]),
-      lowClicks:     parseNum(row[22]),
-      increase:      parseNum(row[23]),
-      maxAcos:       parseNum(row[24]),
-      dailyBudget:   parseNum(row[25]),    // column Z — new campaign budget value
-      pauseCampaign: parseBool(row[26]),   // column AA — pause campaign flag
+      minAcos:       parseNum(rawV),
+      lowClicks:     parseNum(rawW),
+      increase:      parseNum(rawX),
+      maxAcos:       parseNum(rawY),
+      dailyBudget:   parseNum(row[25]),    // column Z
+      pauseCampaign: parseBool(row[26]),   // column AA
+      _raw: { V: rawV, W: rawW, X: rawX, Y: rawY },  // debug: raw cell values
     });
   }
   return rows;
@@ -447,10 +464,10 @@ function renderTemplatePreview() {
     tr.innerHTML = `
       <td style="color:#e2e8f0;font-family:monospace;font-size:0.7rem;">${escHtml(row.campaign)}</td>
       <td style="text-align:center;">${row.bleeders ? '<span style="color:#f87171;">●</span>' : '<span style="color:#334155;">○</span>'}</td>
-      <td style="text-align:center;color:#fdba74;">${row.minAcos !== null ? row.minAcos+'%' : '–'}</td>
-      <td style="text-align:center;color:#93c5fd;">${row.lowClicks !== null ? '+'+row.lowClicks+'%' : '–'}</td>
-      <td style="text-align:center;color:#86efac;">${row.increase !== null ? '+'+row.increase+'%' : '–'}</td>
-      <td style="text-align:center;color:#86efac;">${row.maxAcos !== null ? row.maxAcos+'%' : '–'}</td>
+      <td style="text-align:center;color:#fdba74;" title="raw: ${row._raw.V}">${row.minAcos !== null ? row.minAcos+'%' : '–'}</td>
+      <td style="text-align:center;color:#93c5fd;" title="raw: ${row._raw.W}">${row.lowClicks !== null ? '+'+row.lowClicks+'%' : '–'}</td>
+      <td style="text-align:center;color:#86efac;" title="raw: ${row._raw.X}">${row.increase !== null ? '+'+row.increase+'%' : '–'}</td>
+      <td style="text-align:center;color:#86efac;" title="raw: ${row._raw.Y}">${row.maxAcos !== null ? row.maxAcos+'%' : '–'}</td>
       <td style="text-align:center;color:#fde047;">${row.dailyBudget !== null ? '$'+row.dailyBudget : '–'}</td>
       <td style="text-align:center;">${row.pauseCampaign ? '<span style="color:#d8b4fe;">⛔</span>' : '<span style="color:#334155;">○</span>'}</td>
     `;
@@ -540,6 +557,7 @@ function startOver() {
   bulkWorkbook = null;
   results = [];
   previewResult = null;
+  processingLog = [];
   document.getElementById('templatePreview').classList.add('hidden');
   document.getElementById('templateInfo').style.display = 'none';
   document.getElementById('bulkInfo').style.display = 'none';
@@ -633,13 +651,23 @@ function matchesCampaign(rowName, tmplName) {
 
 function isEligible(row, cols, tabName) {
   if (cols.bid < 0 || row[cols.bid] === undefined || row[cols.bid] === null || String(row[cols.bid]).trim() === '') return false;
-  if (cols.state >= 0 && String(row[cols.state]||'').toLowerCase().trim() !== 'enabled') return false;
-  if (cols.campaignState >= 0 && String(row[cols.campaignState]||'').toLowerCase().trim() !== 'enabled') return false;
+  // Only reject if explicitly paused or archived (allow blank/unknown state)
+  if (cols.state >= 0) {
+    const sv = String(row[cols.state]||'').toLowerCase().trim();
+    if (sv === 'paused' || sv === 'archived') return false;
+  }
+  if (cols.campaignState >= 0) {
+    const csv = String(row[cols.campaignState]||'').toLowerCase().trim();
+    if (csv === 'paused' || csv === 'archived') return false;
+  }
   if (tabName === 'SB Multi Ad Group Campaigns') {
-    if (cols.campaignServingStatus >= 0 && String(row[cols.campaignServingStatus]||'').trim() !== 'Campaign Status Enabled') return false;
-    if (cols.campaignServingStatusDetails >= 0 && String(row[cols.campaignServingStatusDetails]||'').trim() !== 'CAMPAIGN_STATUS_ENABLED_DETAIL') return false;
+    if (cols.campaignServingStatus >= 0 && String(row[cols.campaignServingStatus]||'').trim() !== '' && String(row[cols.campaignServingStatus]||'').trim() !== 'Campaign Status Enabled') return false;
+    if (cols.campaignServingStatusDetails >= 0 && String(row[cols.campaignServingStatusDetails]||'').trim() !== '' && String(row[cols.campaignServingStatusDetails]||'').trim() !== 'CAMPAIGN_STATUS_ENABLED_DETAIL') return false;
   } else {
-    if (cols.adGroupState >= 0 && String(row[cols.adGroupState]||'').toLowerCase().trim() !== 'enabled') return false;
+    if (cols.adGroupState >= 0) {
+      const agv = String(row[cols.adGroupState]||'').toLowerCase().trim();
+      if (agv === 'paused' || agv === 'archived') return false;
+    }
   }
   return true;
 }
@@ -666,6 +694,7 @@ function processFiles() {
   revokeLinks();
   results = [];
   downloadLinks = [];
+  processingLog = [];
 
   const bs = getBleederSettings();
 
@@ -702,6 +731,16 @@ function processFiles() {
       }
     }
 
+    // Log for diagnostics
+    processingLog.push({
+      tab: cfg.key,
+      sheetFound: sheetName,
+      totalRows: dataRows.length,
+      eligibleRows: eligible.length,
+      matchedCampaigns: campMap.size,
+      campaigns: [...campMap.keys()].slice(0, 20),
+    });
+
     const bleeders = [], minacos = [], lowclicks = [], maxacos = [];
 
     for (const row of eligible) {
@@ -736,21 +775,44 @@ function processFiles() {
         }
       }
 
-      // ── MINACOS ──
+      // ══ COL V: MINACOS ══
+      // Rule: Col V = min ACOS threshold.
+      // If keyword ACOS > V%, lower bid by exactly (ACOS - V)%.
+      // Example: V=70%, keyword ACOS=85% → reduce bid by 15%.
       if (tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos) {
-        const nr = [...row]; nr[cols.bid] = Math.max(0.02, round2(bid * (tmpl.minAcos / acos))); nr[cols.operation] = 'update';
+        const reductionPct = Math.min(acos - tmpl.minAcos, 90); // capped at 90% reduction
+        const newBid = Math.max(0.02, round2(bid * (1 - reductionPct / 100)));
+        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
         minacos.push(nr);
       }
 
-      // ── LOW CLICKS ──
+      // ══ COL W: LOW CLICKS BOOST ══
+      // Rule: Col W = boost %.
+      // If keyword has 0 or 1 click → increase bid by W%.
+      // Applies regardless of ACOS or orders.
       if (tmpl.lowClicks !== null && clicks <= 1) {
-        const nr = [...row]; nr[cols.bid] = round2(bid * (1 + tmpl.lowClicks / 100)); nr[cols.operation] = 'update';
+        const newBid = round2(bid * (1 + tmpl.lowClicks / 100));
+        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
         lowclicks.push(nr);
       }
 
-      // ── MAXACOS ──
-      if (tmpl.maxAcos !== null && tmpl.increase !== null && orders >= 1 && acos > 0 && acos < tmpl.maxAcos) {
-        const nr = [...row]; nr[cols.bid] = round2(bid * (1 + tmpl.increase / 100)); nr[cols.operation] = 'update';
+      // ══ COL Y + X: MAXACOS ══
+      // Rule: Col Y = max ACOS threshold, Col X = increase %.
+      // If keyword ACOS < Y% AND keyword has ≥1 order → increase bid by X%.
+      // Example: Y=25%, keyword ACOS=24%, X=10% → increase bid by 10%.
+      // Excluded only if ACOS is already above col V threshold — that goes to MINACOS instead.
+      // No hard cap on ACOS — col Y is the only ceiling.
+      const alreadyInMinAcos = tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos;
+      if (
+        tmpl.maxAcos !== null &&
+        tmpl.increase !== null &&
+        orders >= 1 &&
+        acos > 0 &&
+        acos < tmpl.maxAcos &&
+        !alreadyInMinAcos
+      ) {
+        const newBid = round2(bid * (1 + tmpl.increase / 100));
+        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
         maxacos.push(nr);
       }
     }
@@ -923,10 +985,32 @@ function renderResults() {
   if (results.length === 0) {
     noRes.classList.remove('hidden');
     hasRes.classList.add('hidden');
+    // Show diagnostics in no-results panel
+    const noResDiag = document.getElementById('noResultsDiag');
+    if (noResDiag && processingLog.length) {
+      noResDiag.innerHTML = '<p style="color:#94a3b8;font-size:0.8rem;font-weight:600;margin:0 0 0.5rem;">🔍 Processing Details:</p>' +
+        processingLog.map(l => `
+          <div style="background:rgba(15,23,42,0.6);border-radius:0.5rem;padding:0.75rem;margin-bottom:0.5rem;font-size:0.75rem;color:#64748b;font-family:monospace;text-align:left;">
+            <span style="color:#93c5fd;">Tab:</span> ${escHtml(l.tab)}<br>
+            <span style="color:#93c5fd;">Sheet found:</span> ${escHtml(l.sheetFound)}<br>
+            <span style="color:#93c5fd;">Total rows:</span> ${l.totalRows} &nbsp;|&nbsp;
+            <span style="color:#93c5fd;">Eligible rows (has bid, not paused):</span> ${l.eligibleRows} &nbsp;|&nbsp;
+            <span style="color:#93c5fd;">Matched campaigns:</span> ${l.matchedCampaigns}<br>
+            <span style="color:#93c5fd;">Campaigns:</span> ${l.campaigns.length ? escHtml(l.campaigns.join(', ')) : '<span style="color:#f87171;">(none — check campaign names match template)</span>'}
+          </div>`).join('');
+    }
     return;
   }
   noRes.classList.add('hidden');
   hasRes.classList.remove('hidden');
+
+  // Diagnostics
+  const diagEl = document.getElementById('diagPanel');
+  if (diagEl && processingLog.length) {
+    diagEl.textContent = processingLog.map(l =>
+      `📋 Tab: ${l.tab}\n   Sheet matched: ${l.sheetFound}\n   Total rows: ${l.totalRows} | Eligible (has bid, not paused): ${l.eligibleRows} | Matched campaigns: ${l.matchedCampaigns}\n   Campaigns: ${l.campaigns.length ? l.campaigns.join(', ') : '(none)'}\n`
+    ).join('\n');
+  }
 
   // Summary cards
   const cats = ['Bleeders','MINACOS','Low Clicks Boost','MAXACOS','Campaign Budget','Campaign Paused'];
