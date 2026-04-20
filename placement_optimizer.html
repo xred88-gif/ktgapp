@@ -378,9 +378,9 @@ function checkReady(){ document.getElementById('processBtn').disabled=!(template
 
 function normPlacement(raw){
   var s=String(raw||'').trim().toLowerCase();
-  if(s==='top'||s.indexOf('top of search')!==-1||s.indexOf('placement top')!==-1) return 'Placement Top';
-  if(s==='product page'||s.indexOf('product page')!==-1||s.indexOf('detail')!==-1||s.indexOf('placement product page')!==-1) return 'Placement Product Page';
-  if(s==='rest of search'||s.indexOf('rest of search')!==-1||s.indexOf('placement rest')!==-1) return 'Placement Rest Of Search';
+  if(s==='top'||s.indexOf('top of search')!==-1||s.indexOf('placement top')!==-1) return 'Placement top';
+  if(s==='product page'||s.indexOf('product page')!==-1||s.indexOf('detail')!==-1||s.indexOf('placement product page')!==-1) return 'Placement product page';
+  if(s==='rest of search'||s.indexOf('rest of search')!==-1||s.indexOf('placement rest')!==-1) return 'Placement rest of search';
   if(s==='amazon business'||s.indexOf('amazon business')!==-1) return 'Placement Amazon Business';
   return String(raw||'').trim();
 }
@@ -448,9 +448,22 @@ function parseBulk(wb){
   if(!raw||!raw.length) return {headers:[],rows:[]};
   var hIdx=0;
   for(var i=0;i<Math.min(10,raw.length);i++){
-    if(raw[i].some(function(c){return String(c).trim()==='Entity'||String(c).trim()==='Product';})){hIdx=i;break;}
+    if(raw[i].some(function(c){var v=String(c).trim().toLowerCase();return v==='entity'||v==='product';})){hIdx=i;break;}
   }
-  var headers=raw[hIdx].map(function(h){return String(h).trim();});
+  // Normalize headers to correct casing regardless of how they appear in the file
+  var headerCaseMap={
+    'entity':'Entity','operation':'Operation','bidding adjustment':'Bidding adjustment',
+    'campaign name (informational only)':'Campaign name (Informational only)',
+    'state':'State','campaign state (informational only)':'Campaign state (Informational only)',
+    'enabled':'enabled','placement':'Placement','placement top':'Placement top',
+    'placement amazon business':'Placement Amazon Business',
+    'placement product page':'Placement product page',
+    'placement rest of search':'Placement rest of search'
+  };
+  var headers=raw[hIdx].map(function(h){
+    var t=String(h).trim();
+    return headerCaseMap[t.toLowerCase()]||t;
+  });
   var rows=[];
   for(var j=hIdx+1;j<raw.length;j++){
     var obj={};
@@ -490,14 +503,17 @@ function runProcess(){
       var updated=0,skipped=0;
       var placementOutRows=[];
       bulk.rows.forEach(function(row){
-        var entity=String(row['Entity']||'').trim();
-        var product=String(row['Product']||'').trim();
+        var entity=String(row['Entity']||'').trim().toLowerCase();
+        var product=String(row['Product']||'').trim().toLowerCase();
         var rawPlacement=String(row['Placement']||'').trim();
-        if(product==='Sponsored Products'&&entity==='Bidding Adjustment'&&rawPlacement!==''){
-          var cam=String(row['Campaign Name']||row['Campaign Name (Informational only)']||'').trim();
+        if(product==='sponsored products'&&entity==='bidding adjustment'&&rawPlacement!==''){
+          var cam=String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||'').trim();
           var plc=normPlacement(rawPlacement);
           if(placementLookup[cam]&&placementLookup[cam][plc]!==undefined){
             var nr=Object.assign({},row);
+            nr['Entity']='Bidding adjustment';
+            nr['State']=String(nr['State']||'').trim().toLowerCase()||nr['State'];
+            nr['Campaign state (Informational only)']=String(nr['Campaign state (Informational only)']||'').trim().toLowerCase()||nr['Campaign state (Informational only)'];
             nr['Percentage']=placementLookup[cam][plc];
             nr['Operation']='Update';
             updated++;
@@ -505,6 +521,7 @@ function runProcess(){
           } else {
             skipped++;
             var copy=Object.assign({},row);
+            copy['Entity']='Bidding adjustment';
             copy['Operation']='Update';
             placementOutRows.push(copy);
           }
@@ -516,10 +533,10 @@ function runProcess(){
       var budgetCampaignNames = Object.keys(tmpl.budgetCampaigns);
       if(budgetCampaignNames.length > 0){
         bulk.rows.forEach(function(row){
-          var entity=String(row['Entity']||'').trim();
-          var product=String(row['Product']||'').trim();
-          if(product==='Sponsored Products' && entity==='Campaign'){
-            var cam=String(row['Campaign Name']||row['Campaign Name (Informational only)']||'').trim();
+          var entity=String(row['Entity']||'').trim().toLowerCase();
+          var product=String(row['Product']||'').trim().toLowerCase();
+          if(product==='sponsored products' && entity==='campaign'){
+            var cam=String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||'').trim();
             if(tmpl.budgetCampaigns[cam] !== undefined){
               var nr=Object.assign({},row);
               nr['Daily Budget'] = tmpl.budgetCampaigns[cam];
@@ -535,10 +552,10 @@ function runProcess(){
       var reduceCampaignNames = Object.keys(tmpl.reduceBidsCampaigns);
       if(reduceCampaignNames.length > 0){
         bulk.rows.forEach(function(row){
-          var entity=String(row['Entity']||'').trim();
-          var product=String(row['Product']||'').trim();
-          if(product==='Sponsored Products' && (entity==='Keyword' || entity==='Product Targeting')){
-            var cam=String(row['Campaign Name']||row['Campaign Name (Informational only)']||'').trim();
+          var entity=String(row['Entity']||'').trim().toLowerCase();
+          var product=String(row['Product']||'').trim().toLowerCase();
+          if(product==='sponsored products' && (entity==='keyword' || entity==='product targeting')){
+            var cam=String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||'').trim();
             if(tmpl.reduceBidsCampaigns[cam] !== undefined){
               var reducePercent = tmpl.reduceBidsCampaigns[cam];
               var currentBid = parseFloat(row['Bid']);
