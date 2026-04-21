@@ -4,7 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Amazon Placement Report Creation</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -59,7 +58,437 @@ code{background:#0f1626;padding:2px 6px;border-radius:6px;border:1px solid rgba(
   </div>
   <footer class="small"></footer>
 </div>
+
+<!-- Worker source — runs in its own memory heap, loads XLSX there -->
+
+
+<!-- Worker source — runs in its own memory heap -->
+<script id="workerSrc" type="text/plain">
+/* ─────────────────────────────────────────────────────────────────────
+   Worker: streams the target sheet directly from the raw ZIP bytes.
+   Never loads the full uncompressed XML into memory.
+   Handles Amazon bulk files: inlineStr cells, 1 GB+ uncompressed XML,
+   bogus <dimension ref="A1"/> declarations, no XLSX.js dependency.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* col letters → 0-based index */
+function colIdx(col) {
+  let n = 0;
+  for (let i = 0; i < col.length; i++) n = n * 26 + col.charCodeAt(i) - 64;
+  return n - 1;
+}
+
+/* decode "AZ123" → {r:122, c:51} (0-based) */
+function decodeAddr(addr) {
+  const m = /^([A-Z]+)(\d+)$/.exec(addr);
+  if (!m) return null;
+  return { r: parseInt(m[2], 10) - 1, c: colIdx(m[1]) };
+}
+
+/* little-endian reads */
+function u16(dv, o) { return dv.getUint16(o, true); }
+function u32(dv, o) { return dv.getUint32(o, true); }
+
+/* XML entity decode */
+function ent(s) {
+  return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<')
+          .replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+          .replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n));
+}
+
+/* ── Parse ZIP Central Directory → map of filename → {compression, compSize, lhdrOff} ── */
+function parseCentralDir(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const len = u8.length;
+  let eocdOff = -1;
+  for (let i = len - 22; i >= Math.max(0, len - 65558); i--) {
+    if (u8[i]===0x50&&u8[i+1]===0x4B&&u8[i+2]===0x05&&u8[i+3]===0x06) { eocdOff = i; break; }
+  }
+  if (eocdOff < 0) throw new Error('Not a valid ZIP file');
+  const cdOffset = u32(dv, eocdOff + 16);
+  const cdSize   = u32(dv, eocdOff + 12);
+  const dec = new TextDecoder('utf-8');
+  const entries = {};
+  let i = cdOffset;
+  while (i < cdOffset + cdSize) {
+    if (u32(dv, i) !== 0x02014B50) break;
+    const compression = u16(dv, i + 10);
+    const compSize    = u32(dv, i + 20);
+    const fnLen       = u16(dv, i + 28);
+    const extraLen    = u16(dv, i + 30);
+    const commLen     = u16(dv, i + 32);
+    const lhdrOff     = u32(dv, i + 42);
+    const fname       = dec.decode(u8.slice(i + 46, i + 46 + fnLen));
+    entries[fname]    = { compression, compSize, lhdrOff };
+    i += 46 + fnLen + extraLen + commLen;
+  }
+  return entries;
+}
+
+/* ── Get compressed bytes for a zip entry via its local file header ── */
+function getEntryData(u8, entry) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const off = entry.lhdrOff;
+  if (u32(dv, off) !== 0x04034B50) throw new Error('Bad local file header');
+  const fnLen    = u16(dv, off + 26);
+  const extraLen = u16(dv, off + 28);
+  const dataStart = off + 30 + fnLen + extraLen;
+  return u8.slice(dataStart, dataStart + entry.compSize);
+}
+
+/* ── Decompress a stored or deflated entry to a UTF-8 string (for small files) ── */
+async function decompressToString(entry, u8) {
+  const compData = getEntryData(u8, entry);
+  if (entry.compression === 0) return new TextDecoder('utf-8').decode(compData);
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  writer.write(compData);
+  writer.close();
+  const reader = ds.readable.getReader();
+  const chunks = [];
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  let total = 0; for (const c of chunks) total += c.length;
+  const merged = new Uint8Array(total);
+  let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length; }
+  return new TextDecoder('utf-8').decode(merged);
+}
+
+/* ── Parse sharedStrings XML → string array ── */
+function parseSharedStrings(xml) {
+  const result = [];
+  const re = /<si>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const texts = [];
+    const tr = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while ((tm = tr.exec(m[1])) !== null) texts.push(ent(tm[1]));
+    result.push(texts.join(''));
+  }
+  return result;
+}
+
+/* ── Stream-parse sheet XML from compressed bytes, posting chunks as rows come in ── */
+async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_SIZE) {
+  const compData = getEntryData(u8, entry);
+
+  let ds, rawReader;
+  if (entry.compression === 0) {
+    // stored (uncompressed) — wrap in a readable stream
+    rawReader = new ReadableStream({
+      start(ctrl) { ctrl.enqueue(compData); ctrl.close(); }
+    }).getReader();
+  } else {
+    ds = new DecompressionStream('deflate-raw');
+    const writer = ds.writable.getWriter();
+    writer.write(compData);
+    writer.close();
+    rawReader = ds.readable.getReader();
+  }
+
+  const dec = new TextDecoder('utf-8');
+  let xmlBuf = '';
+  let first = true;
+  let chunk = [];
+  let maxCol = 0;
+
+  /* XML parse state */
+  let inSheetData = false;
+  let inRow = false;
+  let inCell = false;
+  let inV = false;
+  let inIs = false;
+  let inT = false;
+  let cellType = '';
+  let cellAddr = null;
+  let cellVal = null;
+  let rowCells = null;
+
+  function emitRow() {
+    if (!rowCells) return;
+    const cols = Object.keys(rowCells);
+    if (cols.length) {
+      const mx = Math.max(...cols.map(Number));
+      if (mx > maxCol) maxCol = mx;
+    }
+    const row = new Array(maxCol + 1).fill(null);
+    for (const ci of cols) row[+ci] = rowCells[ci];
+    chunk.push(row);
+    rowCells = null;
+  }
+
+  function flushChunk() {
+    if (!chunk.length) return;
+    const cl = maxCol + 1;
+    for (const r of chunk) { while (r.length < cl) r.push(null); }
+    self.postMessage({id, chunk, partial: true, first, sheetName});
+    first = false;
+    chunk = [];
+  }
+
+  function processBuffer() {
+    while (true) {
+      const lt = xmlBuf.indexOf('<');
+      if (lt < 0) { xmlBuf = ''; break; }
+
+      /* capture text content before next tag */
+      if (lt > 0 && (inV || inT)) {
+        const text = ent(xmlBuf.slice(0, lt));
+        if (inV) {
+          if (cellType === 's') {
+            const si = parseInt(text, 10);
+            cellVal = (si >= 0 && si < sharedStrings.length) ? sharedStrings[si] : text;
+          } else {
+            const n = parseFloat(text);
+            cellVal = isNaN(n) ? text : n;
+          }
+        } else if (inT) {
+          cellVal = (cellVal == null ? '' : cellVal) + text;
+        }
+      }
+      if (lt > 0) xmlBuf = xmlBuf.slice(lt);
+
+      const gt = xmlBuf.indexOf('>');
+      if (gt < 0) break; /* incomplete tag — wait for more data */
+
+      const raw     = xmlBuf.slice(1, gt);
+      xmlBuf        = xmlBuf.slice(gt + 1);
+      const isClose = raw[0] === '/';
+      const isSelf  = raw[raw.length - 1] === '/';
+      const body    = isClose ? raw.slice(1) : raw;
+      const tagName = body.replace(/[\s\/][\s\S]*/, '');
+
+      if (!isClose && !isSelf) {
+        if (!inSheetData) {
+          if (tagName === 'sheetData') inSheetData = true;
+        } else {
+          if (tagName === 'row') {
+            rowCells = {}; inRow = true;
+          } else if (tagName === 'c' && inRow) {
+            const am = /\br="([A-Z]+\d+)"/.exec(raw);
+            const tm = /\bt="([^"]*)"/.exec(raw);
+            cellAddr  = am ? decodeAddr(am[1]) : null;
+            cellType  = tm ? tm[1] : '';
+            cellVal   = null;
+            inCell    = true; inV = false; inIs = false; inT = false;
+          } else if (tagName === 'v'  && inCell) { inV  = true; }
+          else if (tagName === 'is' && inCell) { inIs = true; }
+          else if (tagName === 't'  && inIs)   { inT  = true; cellVal = null; }
+        }
+      } else {
+        if (tagName === 'sheetData' || tagName === 'worksheet') {
+          emitRow(); flushChunk(); return;
+        } else if (tagName === 'row') {
+          emitRow();
+          if (chunk.length >= CHUNK_SIZE) flushChunk();
+          inRow = false;
+        } else if (tagName === 'c') {
+          if (inCell && cellAddr && rowCells !== null) rowCells[cellAddr.c] = cellVal;
+          inCell = false; cellVal = null; cellType = ''; cellAddr = null;
+          inV = false; inIs = false; inT = false;
+        } else if (tagName === 'v')  { inV  = false; }
+        else if (tagName === 't')  { inT  = false; }
+        else if (tagName === 'is') { inIs = false; }
+      }
+    }
+  }
+
+  while (true) {
+    const {done, value} = await rawReader.read();
+    if (done) break;
+    xmlBuf += dec.decode(value, {stream: true});
+    processBuffer();
+  }
+  if (xmlBuf) processBuffer();
+  flushChunk();
+}
+
+/* ── Parse CSV text → aoa, posted in chunks ── */
+function parseCSV(text, id, CHUNK_SIZE) {
+  let first = true;
+  let chunk = [];
+  let pos = 0;
+  const len = text.length;
+
+  function parseLine() {
+    const row = [];
+    let cur = '';
+    let inQ = false;
+    while (pos < len) {
+      const ch = text[pos++];
+      if (ch === '"') {
+        if (inQ && text[pos] === '"') { cur += '"'; pos++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) {
+        row.push(cur === '' ? null : cur);
+        cur = '';
+      } else if ((ch === '\n' || ch === '\r') && !inQ) {
+        if (ch === '\r' && text[pos] === '\n') pos++;
+        row.push(cur === '' ? null : cur);
+        return row;
+      } else {
+        cur += ch;
+      }
+    }
+    if (cur !== '' || row.length) row.push(cur === '' ? null : cur);
+    return row.length ? row : null;
+  }
+
+  while (pos < len) {
+    const row = parseLine();
+    if (!row) break;
+    if (row.length === 1 && row[0] === null) continue; // skip blank lines
+    chunk.push(row);
+    if (chunk.length >= CHUNK_SIZE) {
+      self.postMessage({id, chunk, partial: true, first, sheetName: 'Sheet1'});
+      first = false;
+      chunk = [];
+    }
+  }
+  if (chunk.length) {
+    self.postMessage({id, chunk, partial: true, first, sheetName: 'Sheet1'});
+  }
+}
+
+/* ── Main message handler ── */
+self.onmessage = async function(e) {
+  const {id, buf, sheetCands} = e.data;
+  try {
+    const u8 = new Uint8Array(buf);
+
+    /* ── Detect CSV: ZIP starts with PK\x03\x04, CSV does not ── */
+    const isZip = u8[0] === 0x50 && u8[1] === 0x4B && u8[2] === 0x03 && u8[3] === 0x04;
+    if (!isZip) {
+      const text = new TextDecoder('utf-8').decode(u8);
+      parseCSV(text, id, 1000);
+      self.postMessage({id, done: true});
+      return;
+    }
+
+    const entries = parseCentralDir(u8);
+
+    /* Read workbook.xml → sheet names + rId */
+    const wbEntry = entries['xl/workbook.xml'];
+    if (!wbEntry) throw new Error('xl/workbook.xml not found');
+    const wbXml = await decompressToString(wbEntry, u8);
+
+    const sheetMap = {}; /* name → rId */
+    for (const m of wbXml.matchAll(/<sheet\s[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*\/?>/g)) {
+      sheetMap[m[1]] = m[2];
+    }
+    const sheetNames = Object.keys(sheetMap);
+    if (!sheetNames.length) throw new Error('No sheets found in workbook');
+
+    /* Pick best sheet — exact match first, then substring fallback */
+    let sn = sheetNames[0];
+    outer: for (const n of sheetNames)
+      for (const c of sheetCands)
+        if (n.toLowerCase() === c.toLowerCase()) { sn = n; break outer; }
+    if (sn === sheetNames[0]) {
+      outer2: for (const n of sheetNames)
+        for (const c of sheetCands)
+          if (n.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(n.toLowerCase())) { sn = n; break outer2; }
+    }
+
+    /* rId → sheet file path via workbook.xml.rels */
+    const relsEntry = entries['xl/_rels/workbook.xml.rels'];
+    if (!relsEntry) throw new Error('workbook.xml.rels not found');
+    const relsXml = await decompressToString(relsEntry, u8);
+    const targetRId = sheetMap[sn];
+    const relMatch  = relsXml.match(new RegExp(`Id="${targetRId}"[^>]*Target="([^"]+)"`));
+    if (!relMatch) throw new Error('Cannot find sheet file for: ' + sn);
+    let sheetPath = relMatch[1].replace(/^\//, '');
+    if (!sheetPath.startsWith('xl/')) sheetPath = 'xl/' + sheetPath;
+
+    /* Read sharedStrings (usually tiny, may be empty for inlineStr files) */
+    let sharedStrings = [];
+    const ssEntry = entries['xl/sharedStrings.xml'];
+    if (ssEntry && ssEntry.compSize > 0) {
+      const ssXml = await decompressToString(ssEntry, u8);
+      sharedStrings = parseSharedStrings(ssXml);
+    }
+
+    /* Stream-parse the sheet XML directly from ZIP compressed bytes */
+    const sheetEntry = entries[sheetPath];
+    if (!sheetEntry) throw new Error('Sheet file not found: ' + sheetPath);
+    await streamParseSheet(sheetEntry, u8, sharedStrings, id, sn, 1000);
+
+    self.postMessage({id, done: true});
+  } catch(err) {
+    self.postMessage({id, err: err.message || String(err)});
+  }
+};
+</script>
+
+
 <script>
+/* ================================================================
+   Build an inline Web Worker from the script tag above.
+   The worker runs in its own V8 isolate / heap, so it gets its
+   own memory budget separate from the main page — this is the
+   correct fix for "ArrayBuffer allocation failed" on large files.
+   ================================================================ */
+let _worker = null;
+let _workerReady = false;
+let _pendingWorker = [];
+let _workerCallbacks = new Map();
+let _workerIdSeq = 0;
+
+function getWorker() {
+  if (_worker) return _worker;
+  const src = document.getElementById('workerSrc').textContent;
+  const blob = new Blob([src], {type: 'application/javascript'});
+  const url = URL.createObjectURL(blob);
+  _worker = new Worker(url);
+  _worker.onmessage = function(e) {
+    const {id, chunk, partial, first, sheetName, done, err} = e.data;
+    const cb = _workerCallbacks.get(id);
+    if (!cb) return;
+    if (err) {
+      _workerCallbacks.delete(id);
+      cb.onErr(err);
+    } else if (partial) {
+      cb.onChunk(chunk, sheetName, first);
+    } else if (done) {
+      _workerCallbacks.delete(id);
+      cb.onDone();
+    }
+  };
+  _worker.onerror = function(e) {
+    // If the worker crashes entirely, reject all pending
+    _workerCallbacks.forEach((cb) => cb.onErr('Worker crashed: ' + e.message));
+    _workerCallbacks.clear();
+    _worker = null; // will be recreated on next call
+  };
+  return _worker;
+}
+
+/* Send file to worker for parsing. Calls onChunk(chunk, sheetName) per chunk. Returns Promise<void> */
+function parseInWorker(file, sheetCands, onChunk) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Cannot read file: ' + file.name));
+    reader.onload = function(ev) {
+      const buf = ev.target.result;
+      reader.onload = null; // allow GC
+      const id = ++_workerIdSeq;
+      const w = getWorker();
+      _workerCallbacks.set(id, {
+        onChunk: (chunk, sheetName, first) => { onChunk(chunk, sheetName, first); },
+        onDone: () => { resolve(); },
+        onErr: (err) => { reject(new Error(err)); }
+      });
+      // Transfer the ArrayBuffer to the worker (zero-copy, main thread loses ref)
+      w.postMessage({id, buf, sheetCands}, [buf]);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 /* ---- Helpers ---- */
 const L=[];
 function log(s){L.push(s);if(L.length>300)L.shift()}
@@ -67,49 +496,49 @@ function flushLog(){document.getElementById('log').value=L.join('\n')}
 function setStatus(t,state){const s=document.getElementById('status'),d=document.getElementById('statusDot');s.textContent=t||'';d.classList.remove('ok','err');if(state==='ok')d.classList.add('ok');else if(state==='err')d.classList.add('err')}
 function showWarning(m){const b=document.getElementById('warningBanner');b.style.display=m?'block':'none';b.textContent=m||''}
 function prog(p){const w=document.getElementById('progWrap'),b=document.getElementById('progBar');w.style.display=p>=0?'block':'none';b.style.width=Math.min(100,Math.max(0,p))+'%'}
-function readFile(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>rej(new Error('Read fail: '+f.name));r.readAsArrayBuffer(f)})}
 
-/* yield to browser so it doesn't freeze */
+/* yield to browser */
 const tick=()=>new Promise(r=>setTimeout(r,0));
 
-/* find column index in header array */
 function fc(hdr,names){
   if(!hdr)return -1;
   for(const n of names){const ln=n.toLowerCase().trim();for(let i=0;i<hdr.length;i++){if(String(hdr[i]||'').toLowerCase().trim()===ln)return i}}
   return -1;
 }
-/* get value from row array by col index */
 function gv(r,i){return(i>=0&&r&&i<r.length)?r[i]:''}
-
 function num(v){if(v==null||v==='')return 0;if(typeof v==='number')return isFinite(v)?v:0;const n=parseFloat(String(v).replace(/[^0-9.\-eE]/g,''));return isNaN(n)?0:n}
 function acosDec(v){if(v==null||v==='')return 0;if(typeof v==='number')return isFinite(v)?v:0;const s=String(v).trim();if(!s)return 0;if(s.includes('%')){const n=parseFloat(s.replace(/[^0-9.\-eE]/g,''));return isNaN(n)?0:n/100}const n=parseFloat(s.replace(/[^0-9.\-eE]/g,''));return isNaN(n)?0:Math.abs(n)>1?n/100:n}
 
-/* Normalise placement name for matching against "Placement Top" variants */
 function isPlacementTop(pl){
   const s=String(pl||'').toLowerCase().trim();
   return s==='placement top'||s==='top of search (on-amazon)'||s==='top'||s.includes('top of search');
 }
 
-/* Read one file → return raw AOA (arrays of arrays). Frees workbook immediately. */
-async function loadSheet(file,sheetCands,label){
-  const buf=await readFile(file);
-  await tick();
-  const wb=XLSX.read(buf,{type:'array',cellStyles:false,cellFormula:false,cellHTML:false,cellDates:false});
-  await tick();
-  /* pick best sheet name */
-  let sn=wb.SheetNames[0];
-  outer:for(const n of wb.SheetNames)for(const c of sheetCands)if(n.toLowerCase()===c.toLowerCase()){sn=n;break outer}
-  const ws=wb.Sheets[sn];
-  /* free everything except the one sheet we need */
-  for(const k of wb.SheetNames)if(k!==sn)wb.Sheets[k]=null;
-  if(!ws){log(label+': empty sheet');return null}
-  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
-  /* free workbook */
-  wb.Sheets[sn]=null;wb.SheetNames=null;
-  const rows=aoa.length>1?aoa.length-1:0;
-  log(label+': "'+sn+'" → '+rows+' rows');
-  await tick();
-  return aoa;/* aoa[0]=headers, aoa[1..n]=data */
+/* Load a sheet via the worker. The ArrayBuffer is TRANSFERRED (not copied)
+   to the worker, so the main thread immediately frees that memory. */
+async function loadSheet(file, sheetCands, label) {
+  try {
+    let aoa = null;
+    let resolvedSheetName = '';
+    await parseInWorker(file, sheetCands, (chunk, sheetName, first) => {
+      if (first) {
+        resolvedSheetName = sheetName;
+        aoa = chunk;
+      } else {
+        for (let i = 0; i < chunk.length; i++) aoa.push(chunk[i]);
+      }
+    });
+    const rows = aoa && aoa.length > 1 ? aoa.length - 1 : 0;
+    log(label + ': "' + resolvedSheetName + '" → ' + rows + ' rows');
+    await tick();
+    return aoa;
+  } catch(e) {
+    const msg = e.message || String(e);
+    if (msg.includes('allocation') || msg.includes('memory') || msg.includes('ArrayBuffer')) {
+      throw new Error('Out of memory parsing "' + file.name + '". The file is too large for your browser. Try:\n• Closing other tabs\n• Using Chrome (higher memory limits)\n• Splitting the file into smaller parts');
+    }
+    throw new Error('Failed to read "' + file.name + '": ' + msg);
+  }
 }
 
 /* ---- File assignment UI ---- */
@@ -175,7 +604,6 @@ document.getElementById('proceed').addEventListener('click',async function(){
     function sp(){step++;prog(step/totalSteps*100);flushLog()}
 
     /* ===== 1. Bulk30d → USA entries ===== */
-    /* each entry: [cn,clicks,spend,orders,acos,placement,pct,change] */
     let usa=[];
     if(rf.Bulk30d){
       log('--- Bulk 30d ---');
@@ -194,7 +622,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
           usa.push([String(gv(r,C.cn)||''),num(gv(r,C.cl)),num(gv(r,C.sp)),
                     num(gv(r,C.or)),acosDec(gv(r,C.ac)),String(pl).trim(),
                     num(gv(r,C.pc)),'']);
-          aoa[i]=null;/* free row */
+          aoa[i]=null;
         }
         aoa.length=0;
       }
@@ -203,7 +631,6 @@ document.getElementById('proceed').addEventListener('click',async function(){
     await tick();
 
     /* ===== 2. Bulk7d → b7 entries + placement lookup map ===== */
-    /* each: [cn,pl,clicks,spend,orders,acos] */
     let b7=[];
     let b7Map=new Map();
     if(rf.Bulk7d){
@@ -232,7 +659,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
     }
     await tick();
 
-    /* ===== 3. DayBefore → db entries [cn,portfolio,budget,spend] ===== */
+    /* ===== 3. DayBefore → db entries ===== */
     let db=[];
     if(rf.DayBeforeYesterday){
       log('--- Day Before Yesterday ---');
@@ -255,7 +682,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
     }
     await tick();
 
-    /* ===== 4. Yesterday → yd entries [cn,spend] + TOS ===== */
+    /* ===== 4. Yesterday → yd entries + TOS ===== */
     let yd=[];
     let tosYd=[];
     if(rf.Yesterday){
@@ -330,16 +757,10 @@ document.getElementById('proceed').addEventListener('click',async function(){
         const u=b7Map.get(k);
         if(!u)continue;
         m++;
+        const base=e[6];
+        const placement=e[5];
+        let nv=base;
 
-        const base=e[6];      // current percentage from Bulk 30d
-        const placement=e[5]; // placement name string
-        let nv=base;          // new value starts equal to base
-
-        /*
-          Special rule: if ACOS is 0% AND the placement is NOT "Placement Top",
-          do NOT add anything to the Changes in placement column — leave it blank.
-          For Placement Top, normal logic applies even when ACOS is 0%.
-        */
         if(u.acos===0 && !isPlacementTop(placement)){
           e[7]='';
           continue;
@@ -354,15 +775,11 @@ document.getElementById('proceed').addEventListener('click',async function(){
           else if(u.acos>=0.2&&u.acos<0.3){nv=base+5;}
           else if(u.acos>=0.1&&u.acos<0.2){nv=base+10;}
           else if(u.acos>0&&u.acos<0.1){nv=base+15;}
-          // acos between 0.3 and 0.5 → no change, nv stays equal to base
         }
 
         if(nv<0)nv=0;
         if(nv>900)nv=900;
-
         const rounded=Math.round(nv*100)/100;
-
-        // Only write the new value if it actually differs from the current percentage
         e[7]=(rounded!==base)?rounded:'';
       }
       log('Placement matches: '+m+'/'+usa.length);
@@ -370,8 +787,20 @@ document.getElementById('proceed').addEventListener('click',async function(){
     b7Map.clear();b7Map=null;
     await tick();sp();
 
-    /* ===== 8. Build output workbook using AOA (fastest) ===== */
+    /* ===== 8. Build output — load XLSX only now in main thread for writing ===== */
     log('--- Building output ---');
+
+    // Dynamically load XLSX into main thread only when needed for writing
+    // (it was never loaded here before — worker had its own copy)
+    if (typeof XLSX === 'undefined') {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+
     const out=XLSX.utils.book_new();
     let added=0;
 
@@ -440,7 +869,11 @@ document.getElementById('proceed').addEventListener('click',async function(){
 
     log('Writing file...');flushLog();
     await tick();
-    XLSX.writeFile(out,'placement.xlsx');
+    const outBuf=XLSX.write(out,{bookType:'xlsx',type:'array'});
+    const blob=new Blob([outBuf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='placement.xlsx';document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1000);
     log('✅ Exported placement.xlsx');
     setStatus('Done — downloaded','ok');prog(100);
 
