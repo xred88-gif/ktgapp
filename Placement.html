@@ -233,19 +233,29 @@ async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_S
   function processBuffer() {
     while (true) {
       const lt = xmlBuf.indexOf('<');
-      if (lt < 0) { xmlBuf = ''; break; }
+
+      if (lt < 0) {
+        /* No '<' left in buffer — if we're inside a value tag, the entire
+           remaining buffer is partial text; accumulate it and keep it so
+           the next read() call can append more data and complete the value.
+           Do NOT clear xmlBuf here — that would drop the partial text. */
+        if ((inV || inT) && xmlBuf.length > 0) {
+          const text = ent(xmlBuf);
+          /* always accumulate as string; inV is finalized at </v> */
+          cellVal = (cellVal == null ? '' : cellVal) + text;
+          xmlBuf = '';
+        } else {
+          xmlBuf = '';
+        }
+        break;
+      }
 
       /* capture text content before next tag */
       if (lt > 0 && (inV || inT)) {
         const text = ent(xmlBuf.slice(0, lt));
         if (inV) {
-          if (cellType === 's') {
-            const si = parseInt(text, 10);
-            cellVal = (si >= 0 && si < sharedStrings.length) ? sharedStrings[si] : text;
-          } else {
-            const n = parseFloat(text);
-            cellVal = isNaN(n) ? text : n;
-          }
+          /* always accumulate as string — we parse the number at </v> */
+          cellVal = (cellVal == null ? '' : cellVal) + text;
         } else if (inT) {
           cellVal = (cellVal == null ? '' : cellVal) + text;
         }
@@ -275,7 +285,7 @@ async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_S
             cellType  = tm ? tm[1] : '';
             cellVal   = null;
             inCell    = true; inV = false; inIs = false; inT = false;
-          } else if (tagName === 'v'  && inCell) { inV  = true; }
+          } else if (tagName === 'v'  && inCell) { inV  = true; cellVal = null; }
           else if (tagName === 'is' && inCell) { inIs = true; }
           else if (tagName === 't'  && inIs)   { inT  = true; cellVal = null; }
         }
@@ -290,7 +300,20 @@ async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_S
           if (inCell && cellAddr && rowCells !== null) rowCells[cellAddr.c] = cellVal;
           inCell = false; cellVal = null; cellType = ''; cellAddr = null;
           inV = false; inIs = false; inT = false;
-        } else if (tagName === 'v')  { inV  = false; }
+        } else if (tagName === 'v') {
+          /* finalize: parse number/sharedString from accumulated string */
+          if (inV && cellVal != null) {
+            const sv = String(cellVal);
+            if (cellType === 's') {
+              const si = parseInt(sv, 10);
+              cellVal = (si >= 0 && si < sharedStrings.length) ? sharedStrings[si] : sv;
+            } else {
+              const n = parseFloat(sv);
+              cellVal = isNaN(n) ? sv : n;
+            }
+          }
+          inV = false;
+        }
         else if (tagName === 't')  { inT  = false; }
         else if (tagName === 'is') { inIs = false; }
       }
@@ -673,7 +696,8 @@ document.getElementById('proceed').addEventListener('click',async function(){
                  sp:fc(h,['Spend','Spend (USD)','Total Spend','Total Cost'])};
         for(let i=1;i<aoa.length;i++){
           const r=aoa[i];if(!r)continue;
-          db.push([String(gv(r,C.cn)||''),String(gv(r,C.po)||''),gv(r,C.bu)||'',num(gv(r,C.sp))]);
+          const rawBu=String(gv(r,C.bu)||'').replace(/US\$|\$|USD/g,'').trim();
+          db.push([String(gv(r,C.cn)||''),String(gv(r,C.po)||''),rawBu,num(gv(r,C.sp))]);
           aoa[i]=null;
         }
         aoa.length=0;
