@@ -367,14 +367,20 @@ function parseBool(val) {
   const s = String(val).toLowerCase().trim();
   return s === 'true' || s === 'yes' || s === '1' || s === 'x';
 }
-function parseNum(val) {
+function parseNum(val, isPercentCol) {
   if (val === undefined || val === null || val === '') return null;
   let s = String(val).trim();
-  let isPercent = s.endsWith('%');
-  if (isPercent) s = s.slice(0, -1);
+  let hasPercentSign = s.endsWith('%');
+  if (hasPercentSign) s = s.slice(0, -1);
   const n = parseFloat(s);
   if (isNaN(n)) return null;
-  if (!isPercent && n > 0 && n < 1) return n * 100;
+  // If the cell had a literal "%" sign, the number is already in percent form (e.g. "100%"→100)
+  if (hasPercentSign) return n;
+  // If we know this column is a percentage column in Excel (stores 0–1 as fraction),
+  // always multiply by 100 (handles 0.15→15, 1.0→100, 0→0, etc.)
+  if (isPercentCol) return n * 100;
+  // Fallback for unknown columns: only convert obvious fractions (0 < n < 1)
+  if (n > 0 && n < 1) return n * 100;
   return n;
 }
 function parseNumVal(val) {
@@ -401,24 +407,54 @@ function round2(n) { return Math.round(n * 100) / 100; }
 // ═══════════════════════════════════════════════════════════════
 function parseTemplate(workbook) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  // Read raw (numeric) values for index-based access
+  const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  // Read formatted (string) values so Excel percentage cells show as "15%" etc.
+  const fmtData = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
   const rows = [];
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
+  for (let i = 1; i < rawData.length; i++) {
+    const row = rawData[i];
+    const fmtRow = fmtData[i] || [];
     if (!row || !row[0]) continue;
     const campaign = String(row[0] || '').trim();
     if (!campaign) continue;
+
+    // For columns V(21) W(22) X(23) Y(24): use formatted value if available so
+    // Excel percentage cells (stored as 0–1 fraction) are read as "15%" or "100%".
+    // Fall back to raw with isPercentCol=true so raw 1.0 → 100, 0.15 → 15, etc.
+    function readPctCol(idx) {
+      const fmt = fmtRow[idx];
+      const raw = row[idx];
+      // If SheetJS formatted it as a percent string, use that (already in % form)
+      if (fmt !== undefined && fmt !== null && String(fmt).trim().endsWith('%')) {
+        return parseNum(fmt, false);
+      }
+      // Otherwise treat raw numeric as a fraction (Excel percentage storage)
+      return parseNum(raw, true);
+    }
+
+    // Column Z (25): daily budget — plain dollar number, never a fraction/percent.
+    // Use the raw numeric value directly (no fraction-to-percent conversion).
+    function readBudgetCol(idx) {
+      const raw = row[idx];
+      const fmt = fmtRow[idx];
+      // If formatted value looks like a dollar or plain number, use raw directly
+      if (raw === undefined || raw === null || raw === '') return null;
+      const n = parseFloat(String(raw));
+      return isNaN(n) ? null : round2(n);
+    }
+
     const rawV = row[21], rawW = row[22], rawX = row[23], rawY = row[24];
     rows.push({
       campaign,
       bleeders:      parseBool(row[20]),
-      minAcos:       parseNum(rawV),
-      lowClicks:     parseNum(rawW),
-      increase:      parseNum(rawX),
-      maxAcos:       parseNum(rawY),
-      dailyBudget:   parseNum(row[25]),    // column Z
-      pauseCampaign: parseBool(row[26]),   // column AA
-      _raw: { V: rawV, W: rawW, X: rawX, Y: rawY },  // debug: raw cell values
+      minAcos:       readPctCol(21),
+      lowClicks:     readPctCol(22),
+      increase:      readPctCol(23),
+      maxAcos:       readPctCol(24),
+      dailyBudget:   readBudgetCol(25),   // column Z — dollar amount
+      pauseCampaign: parseBool(row[26]),  // column AA
+      _raw: { V: rawV, W: rawW, X: rawX, Y: rawY, fmtY: fmtData[i]?.[24] },
     });
   }
   return rows;
