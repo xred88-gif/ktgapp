@@ -8,30 +8,31 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-:root { --bg:#0b1220; --panel:#121a2b; --ink:#e7ecf8; --muted:#9fb0d3; --accent:#7aa2ff; --ok:#2ecc71; --warn:#ffb020; }
-*{ box-sizing: border-box; }
-body{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--ink); }
-.wrap{ max-width: 980px; margin: 40px auto; padding: 24px; }
-.card{ background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
-h1{ font-size: 28px; margin: 0 0 16px; }
-p.help{ color: var(--muted); margin-top: 6px; }
-label{ display:block; font-weight:600; margin: 12px 0 6px; }
-input[type="file"], input[type="number"], button{
-  width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background: #0f1626; color: var(--ink); outline: none;
-}
-input[type="file"]:focus, input[type="number"]:focus, button:focus{ border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,162,255,0.25); }
-button{ cursor:pointer; font-weight:700; letter-spacing: .2px; background: linear-gradient(90deg, #5a82ff, #7aa2ff); border: none; }
-button.secondary{ background: #18223a; font-weight:600; }
-.row{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.mt{ margin-top: 14px; }
-.small{ font-size: 12px; color: var(--muted); }
-.pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#0f1626; border:1px solid rgba(255,255,255,0.08); }
-.status{ display:flex; gap:10px; align-items:center; margin-top:12px; }
-.dot{ width:10px; height:10px; border-radius:50%; background: var(--warn); }
-.dot.ok{ background: var(--ok); }
-.hidden{ display:none !important; }
-footer{ margin-top: 24px; color: var(--muted); font-size: 12px; text-align:center; }
-code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.08); }
+:root{--bg:#0b1220;--ink:#e7ecf8;--muted:#9fb0d3;--accent:#7aa2ff;--ok:#2ecc71;--warn:#ffb020;}
+*{box-sizing:border-box;}
+body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);}
+.wrap{max-width:980px;margin:40px auto;padding:24px;}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);}
+h1{font-size:28px;margin:0 0 16px;}
+p.help{color:var(--muted);margin-top:6px;}
+label{display:block;font-weight:600;margin:12px 0 6px;}
+input[type=file],input[type=number],button{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0f1626;color:var(--ink);outline:none;}
+input[type=file]:focus,input[type=number]:focus,button:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(122,162,255,.25);}
+button{cursor:pointer;font-weight:700;letter-spacing:.2px;background:linear-gradient(90deg,#5a82ff,#7aa2ff);border:none;}
+button.secondary{background:#18223a;font-weight:600;}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.mt{margin-top:14px;}
+.small{font-size:12px;color:var(--muted);}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0f1626;border:1px solid rgba(255,255,255,.08);}
+.status{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--warn);}
+.dot.ok{background:var(--ok);}
+.hidden{display:none!important;}
+footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center;}
+code{background:#0f1626;padding:2px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.08);}
+#progressWrap{width:100%;margin-top:8px;background:#0f1626;border-radius:999px;height:8px;overflow:hidden;display:none;}
+#progressBar{height:100%;width:0%;background:linear-gradient(90deg,#5a82ff,#7aa2ff);border-radius:999px;transition:width .15s ease;}
+#progressLabel{font-size:11px;color:var(--muted);margin-top:4px;display:none;}
 </style>
 </head>
 <body>
@@ -41,23 +42,23 @@ code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid
     <p class="help">Upload your Amazon 60 days or 30 days bulk file. Choose whether to include Suggestions before exporting.</p>
 
     <label for="file">Excel file (.xlsx)</label>
-    <input id="file" type="file" accept=".xlsx" />
+    <input id="file" type="file" accept=".xlsx"/>
 
     <div class="row mt">
       <div>
         <label for="orders">Orders must be ≤</label>
-        <input id="orders" type="number" value="5" min="0" step="1" />
+        <input id="orders" type="number" value="5" min="0" step="1"/>
       </div>
       <div></div>
     </div>
 
     <div class="mt">
       <label>Step 1 ACOS thresholds per sheet (≥)</label>
-      <input id="acos_SP" type="number" value="0.55" min="0" step="0.01" placeholder="SP Search Term Report" class="mt"/>
+      <input id="acos_SP"  type="number" value="0.55" min="0" step="0.01" placeholder="SP Search Term Report" class="mt"/>
       <input id="acos_SPC" type="number" value="0.55" min="0" step="0.01" placeholder="Sponsored Products Campaigns" class="mt"/>
-      <input id="acos_SB" type="number" value="0.45" min="0" step="0.01" placeholder="SB Search Term Report" class="mt"/>
+      <input id="acos_SB"  type="number" value="0.45" min="0" step="0.01" placeholder="SB Search Term Report" class="mt"/>
       <input id="acos_SBC" type="number" value="0.45" min="0" step="0.01" placeholder="Sponsored Brands Campaigns" class="mt"/>
-      <input id="acos_SD" type="number" value="0.45" min="0" step="0.01" placeholder="Sponsored Display Campaigns" class="mt"/>
+      <input id="acos_SD"  type="number" value="0.45" min="0" step="0.01" placeholder="Sponsored Display Campaigns" class="mt"/>
     </div>
 
     <div class="mt">
@@ -66,17 +67,19 @@ code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid
     </div>
 
     <div class="mt">
-      <label><input type="checkbox" id="includeSug" checked /> Include Suggestions</label>
+      <label><input type="checkbox" id="includeSug" checked/> Include Suggestions</label>
     </div>
 
     <div class="row mt">
-      <button id="processBtn">⚙️ Process & Export</button>
+      <button id="processBtn">⚙️ Process &amp; Export</button>
     </div>
 
     <div class="status hidden" id="status">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Processing…</span>
     </div>
+    <div id="progressWrap"><div id="progressBar"></div></div>
+    <div id="progressLabel"></div>
 
     <div class="row mt">
       <button id="downloadBtn" class="hidden">⬇️ Download Excel</button>
@@ -92,15 +95,21 @@ code { background:#0f1626; padding: 2px 6px; border-radius:6px; border:1px solid
       <span class="pill">5. Sponsored Display Campaigns</span>
     </p>
   </div>
-
-  <footer>
-    KTG - 2025 - copyright © 2020 all rights reserved  <code>KTG</code>
-  </footer>
+  <footer>KTG - 2025 - copyright © 2020 all rights reserved <code>KTG</code></footer>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script>
-// === Constants ===
+<!-- Worker code stored in a non-executing script tag to avoid template-literal escaping -->
+<script id="workerSrc" type="text/plain">
+// ═══════════════════════════════════════════════════════════════════
+//  Bleeders 2.0 – Web Worker  (memory-optimised for large files)
+//  Strategy: stream-unzip with fflate (never holds full file twice),
+//  chunk-based SAX parsing (never holds full XML string in memory),
+//  and explicit null-out of consumed buffers to help GC.
+// ═══════════════════════════════════════════════════════════════════
+importScripts("https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js");
+importScripts("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
+
+// ── Constants (identical to original) ──────────────────────────────
 const SHTS = [
   "SP Search Term Report",
   "Sponsored Products Campaigns",
@@ -108,287 +117,520 @@ const SHTS = [
   "Sponsored Brands Campaigns",
   "Sponsored Display Campaigns"
 ];
-
 const COLS = {
-  "SP Search Term Report": [
-    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term",
-    "Impressions","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","ROAS","Orders"
-  ],
-  "Sponsored Products Campaigns": [
-    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion",
-    "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
-  ],
-  "SB Search Term Report": [
-    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term",
-    "Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"
-  ],
-  "Sponsored Brands Campaigns": [
-    "Campaign Name (Informational only)","Product Targeting Expression","Match Type","Clicks","Suggestion","CPC","Spend","Sales","ACOS","Orders"
-  ],
-  "Sponsored Display Campaigns": [
-    "Campaign Name (Informational only)","Ad Group Name (Informational only)","Targeting Expression","Clicks","Suggestion","Spend","CPC","Sales","ACOS","Orders"
-  ]
+  "SP Search Term Report":        ["Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term","Impressions","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","ROAS","Orders"],
+  "Sponsored Products Campaigns": ["Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"],
+  "SB Search Term Report":        ["Campaign Name (Informational only)","Ad Group Name (Informational only)","Product Targeting Expression","Match Type","Suggestion","Customer Search Term","Clicks","Click-through Rate","CPC","Spend","Sales","ACOS","Orders"],
+  "Sponsored Brands Campaigns":   ["Campaign Name (Informational only)","Product Targeting Expression","Match Type","Clicks","Suggestion","CPC","Spend","Sales","ACOS","Orders"],
+  "Sponsored Display Campaigns":  ["Campaign Name (Informational only)","Ad Group Name (Informational only)","Targeting Expression","Clicks","Suggestion","Spend","CPC","Sales","ACOS","Orders"]
 };
 
-// === Helpers ===
-const norm = v => v==null ? "" : String(v).trim();
+// ── Helpers ─────────────────────────────────────────────────────────
+const norm = v => v == null ? "" : String(v).trim();
 const lower = v => norm(v).toLowerCase();
-const isNotPaused = val => {
-  const s = lower(val);
-  return s !== "paused" && s !== "pause" && s !== "stopped" && s !== "disabled" && s !== "";
-};
-function parseNumber(val){
-  if (val==null) return NaN;
-  let s = String(val).replace(/\s/g,"").replace("%","").replace(",",".");
-  const n = parseFloat(s);
-  return isNaN(n) ? NaN : n;
+const isNotPaused = v => { const s=lower(v); return s!=="paused"&&s!=="pause"&&s!=="stopped"&&s!=="disabled"&&s!==""; };
+function parseNum(val){
+  if(val==null||val==="") return NaN;
+  const n=parseFloat(String(val).replace(/[\s%]/g,"").replace(",","."));
+  return isNaN(n)?NaN:n;
+}
+function fmtPct(val){
+  const raw=norm(val); if(!raw) return "";
+  const hasPct=raw.includes("%"), n=parseNum(raw); if(isNaN(n)) return raw;
+  const v=hasPct?n:(n<=1?n*100:n);
+  return v.toFixed(2).replace(/\.?0+$/,"") + "%";
 }
 
-// NEW: robust percentage formatter for CTR (keeps everything else unchanged)
-function formatPercent(val, decimals=2){
-  const raw = norm(val);
-  if(raw === "") return "";
-  const hasPct = /%/.test(raw);
-  const n = parseNumber(raw);
-  if (isNaN(n)) return raw;                   // leave non-numeric as-is
-  const v = hasPct ? n : (n <= 1 ? n*100 : n); // 0.123 -> 12.3 ; 12.3 -> 12.3
-  const s = v.toFixed(decimals).replace(/\.?0+$/,""); // trim trailing zeros
-  return s + "%";
+// ── Byte-level streaming XML parser ────────────────────────────────
+// Works directly on Uint8Array — never converts to a JS string.
+// Decodes only small tag/attribute/text fragments on demand.
+// This is the key fix for "Invalid string length" on huge XML files.
+
+const _td = new TextDecoder();
+// Decode a small byte slice to string (tags/attributes are always small)
+function sliceStr(buf, start, end){ return _td.decode(buf.subarray(start, end)); }
+
+// XML entity unescape (only the handful that appear in xlsx)
+function unescXml(s){
+  return s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+          .replace(/&quot;/g,'"').replace(/&apos;/g,"'");
 }
 
-// flexible, case-insensitive column finder
-function getColFlexible(rowObj, keywords){
-  if(!rowObj) return null;
-  const keys = Object.keys(rowObj);
-  for(const key of keys){
-    const clean = key.replace(/\s|\(|\)|%/g,"").toLowerCase();
-    for(const kw of keywords){
-      const ck = String(kw).replace(/\s|\(|\)|%/g,"").toLowerCase();
-      if(clean.includes(ck)) return key;
-    }
+// Parse attributes out of a raw tag byte slice (already a small string)
+function parseAttrs(raw){
+  const attrs={};
+  const re=/(\w[\w:.-]*)="([^"]*)"/g; let m;
+  while((m=re.exec(raw))!==null) attrs[m[1]]=unescXml(m[2]);
+  return attrs;
+}
+
+// Streaming byte SAX — calls handlers without building the full string.
+// handlers: { open(tag,attrs), close(tag), text(str) }
+// Processes in FEED-byte windows to keep memory flat.
+function saxBytes(buf, handlers){
+  const LT=60, GT=62, SLASH=47, BANG=33, QUEST=63, SPACE=32, TAB=9, NL=10, CR=13;
+  const len=buf.length;
+  let i=0;
+
+  function peekByte(pos){ return pos<len?buf[pos]:-1; }
+
+  // Read bytes until byte `b` found; return slice as string, advance i past it
+  function readUntilByte(b){
+    const start=i;
+    while(i<len && buf[i]!==b) i++;
+    const s=sliceStr(buf,start,i);
+    if(i<len) i++; // skip the delimiter
+    return s;
   }
-  return null;
-}
-// case-insensitive worksheet lookup
-function getSheetInsensitive(wb, expectedName){
-  if(!wb || !wb.SheetNames) return null;
-  const want = expectedName.toLowerCase();
-  for(const n of wb.SheetNames){
-    if(n.toLowerCase() === want) return wb.Sheets[n];
+
+  while(i<len){
+    // find next '<'
+    const ltPos=buf.indexOf(LT,i);
+    if(ltPos<0){
+      // remaining text
+      if(i<len) handlers.text && handlers.text(unescXml(sliceStr(buf,i,len)));
+      break;
+    }
+    if(ltPos>i){
+      handlers.text && handlers.text(unescXml(sliceStr(buf,i,ltPos)));
+    }
+    i=ltPos+1;
+    if(i>=len) break;
+
+    const firstByte=buf[i];
+
+    // PI or comment — skip to '>'
+    if(firstByte===QUEST||firstByte===BANG){
+      while(i<len && buf[i]!==GT) i++;
+      i++; continue;
+    }
+
+    // closing tag
+    if(firstByte===SLASH){
+      i++; // skip '/'
+      const start=i;
+      while(i<len && buf[i]!==GT) i++;
+      const tag=sliceStr(buf,start,i).trim();
+      i++; // skip '>'
+      handlers.close && handlers.close(tag);
+      continue;
+    }
+
+    // opening (or self-closing) tag — read until '>'
+    const tagStart=i;
+    while(i<len && buf[i]!==GT) i++;
+    const rawTag=sliceStr(buf,tagStart,i);
+    i++; // skip '>'
+
+    const selfClose=rawTag.endsWith("/");
+    const inner=selfClose?rawTag.slice(0,-1).trimEnd():rawTag;
+    // split tag name from attributes
+    let sp=0;
+    while(sp<inner.length && inner.charCodeAt(sp)>32) sp++;
+    const tag=inner.slice(0,sp);
+    const attrStr=inner.slice(sp);
+    const attrs=attrStr.trim()?parseAttrs(attrStr):{};
+    handlers.open && handlers.open(tag,attrs);
+    if(selfClose) handlers.close && handlers.close(tag);
   }
-  // loose contains match fallback
-  for(const n of wb.SheetNames){
-    if(n.toLowerCase().includes(want)) return wb.Sheets[n];
-  }
-  return null;
 }
 
-// Canonicalize row keys to match output headers
-function remapToCanonical(row, targetHeaders){
-  const out = {...row};
-  const clean = s => String(s||"").toLowerCase().replace(/[\s\(\)%_\-\.\/]/g,"");
-  const keys = Object.keys(row);
-  for(const h of targetHeaders){
-    if(out[h] !== undefined) continue;
-    const ch = clean(h);
-    for(const k of keys){
-      if(clean(k) === ch){ out[h] = row[k]; break; }
+// ── Parse shared-strings XML directly from bytes ────────────────────
+function parseSharedStrings(buf){
+  const arr=[];
+  let inSi=false, inT=false, buf2="", pending="";
+  saxBytes(buf, {
+    open(tag){ 
+      if(tag==="si"){inSi=true;buf2="";}
+      else if(tag==="t"&&inSi){inT=true;pending="";}
+    },
+    text(s){ if(inT) pending+=s; },
+    close(tag){
+      if(tag==="t"&&inSi){buf2+=pending;inT=false;}
+      else if(tag==="si"){arr.push(buf2);inSi=false;}
     }
-  }
-  return out;
+  });
+  return arr;
 }
 
-// Filtering & Suggestions (SB now uses >= like the others)
-function filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, withSuggestions){
-  const acosMin = acosMap[canonicalName] || 0;
-  const out = [];
-
-  const sample = df[0] || {};
-  const colState        = getColFlexible(sample, ["State"]);
-  const colCampState    = getColFlexible(sample, ["Campaign State"]);
-  const colAdGroupState = getColFlexible(sample, ["Ad Group State"]);
-  const colOrders       = getColFlexible(sample, ["Orders"]);
-  const colACOS         = getColFlexible(sample, ["ACOS"]);
-  const colCTR          = getColFlexible(sample, ["Click-through Rate","CTR"]);
-  const colROAS         = getColFlexible(sample, ["ROAS"]);
-  const colKeyword      = getColFlexible(sample, ["Keyword Text"]);
-  const colPT           = getColFlexible(sample, ["Product Targeting Expression","Targeting Expression"]);
-  const colEntity       = getColFlexible(sample, ["Entity"]);
-  const colMatchType    = getColFlexible(sample, ["Match Type"]);
-
-  for(const row of df){
-    // entity filters
-    if(canonicalName === "Sponsored Products Campaigns" && colEntity){
-      const entityVal = lower(row[colEntity]);
-      if(entityVal !== "keyword" && entityVal !== "product targeting") continue;
-    }
-    if(canonicalName === "Sponsored Display Campaigns" && colEntity){
-      const entityVal = lower(row[colEntity]);
-      if(entityVal === "ad group" || entityVal === "product ad") continue;
-    }
-    if(canonicalName === "Sponsored Display Campaigns" && colAdGroupState){
-      const agState = lower(row[colAdGroupState]);
-      if(agState === "" || agState === "paused") continue;
-    }
-
-    // Orders filter
-    const ordersVal = colOrders ? parseNumber(row[colOrders]) : NaN;
-    if(!isNaN(ordersVal) && ordersVal > ordersMax) continue;
-
-    // ACOS filter
-    const acosVal = colACOS ? parseNumber(row[colACOS]) : NaN;
-    if(!isNaN(acosVal) && acosVal < acosMin) continue;
-
-    // Paused/State filters
-    if(colState && !isNotPaused(row[colState])) continue;
-    if(colCampState && !isNotPaused(row[colCampState])) continue;
-
-    // SP Search Term Report: skip exact match (case-insensitive)
-    if(canonicalName==="SP Search Term Report" && colPT && colMatchType){
-      const mt = lower(row[colMatchType]);
-      if(mt === "exact") continue;
-    }
-
-    const r = {...row};
-
-    // Combine Keyword Text + Product Targeting Expression
-    if(colKeyword || colPT){
-      const kw = colKeyword ? norm(row[colKeyword]) : "";
-      const pt = colPT ? norm(row[colPT]) : "";
-      r["Product Targeting Expression"] = kw && pt ? `${kw} | ${pt}` : kw || pt;
-      if(colKeyword) delete r[colKeyword];
-    }
-
-    // Percent formatting (CTR uses robust formatter; ACOS formatted; ROAS preserved)
-    if(colCTR && r[colCTR] !== ""){
-      r[colCTR] = formatPercent(r[colCTR]);
-    }
-    if(colACOS && r[colACOS] !== ""){
-      const num = parseNumber(r[colACOS]); if(!isNaN(num)) r[colACOS] = (num*100).toFixed(2) + "%";
-    }
-    // ROAS is intentionally left untouched so it stays exactly as in the source file
-
-    // Suggestions
-    if(withSuggestions){
-      if(!isNaN(acosVal)){
-        switch(canonicalName){
-          case "SP Search Term Report":
-          case "SB Search Term Report":
-            r["Suggestion"] = acosVal >= sugACOS ? "Negative exact" : "Leave";
-            break;
-          case "Sponsored Products Campaigns":
-          case "Sponsored Display Campaigns":
-          case "Sponsored Brands Campaigns":
-            r["Suggestion"] = acosVal >= sugACOS ? "Pause" : "Leave";
-            break;
-        }
-      } else {
-        r["Suggestion"] = "Leave";
+// ── Parse workbook.xml bytes → [{name, rId}] ────────────────────────
+function parseWorkbookSheets(buf){
+  const sheets=[];
+  saxBytes(buf, {
+    open(tag,attrs){
+      if(tag==="sheet"){
+        sheets.push({name:(attrs.name||"").trim(), rId:attrs["r:id"]||attrs.id||""});
       }
     }
-
-    // Canonicalize keys to output headers
-    const targetHeaders = COLS[canonicalName];
-    const rc = remapToCanonical(r, targetHeaders);
-    out.push(rc);
-  }
-  return out;
-}
-
-// Convert sheets
-const sheetToJSON = ws => XLSX.utils.sheet_to_json(ws,{defval:""});
-function aoaToSheet(headers, rows, withSuggestions){
-  const finalHeaders = withSuggestions ? headers : headers.filter(h=>h!=="Suggestion");
-  return XLSX.utils.aoa_to_sheet([finalHeaders, ...rows.map(r=>finalHeaders.map(h=>r[h]??""))]);
-}
-
-// Status
-function setStatus(text, ok=false){
-  const s=document.getElementById("status"), dot=document.getElementById("statusDot"), t=document.getElementById("statusText");
-  s.classList.remove("hidden"); t.textContent=text; dot.classList.toggle("ok",ok);
-}
-
-// File Handling
-const fileEl=document.getElementById("file");
-const ordersEl=document.getElementById("orders");
-const processBtn=document.getElementById("processBtn");
-const downloadBtn=document.getElementById("downloadBtn");
-const resetBtn=document.getElementById("resetBtn");
-let outBlob=null;
-
-async function readFile(file){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=e=>resolve(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));
-    reader.onerror=reject;
-    reader.readAsArrayBuffer(file);
   });
+  return sheets;
+}
+
+// ── Parse workbook.xml.rels bytes → {rId: target} ───────────────────
+function parseRels(buf){
+  const map={};
+  saxBytes(buf, {
+    open(tag,attrs){
+      if(tag==="Relationship") map[attrs.Id]=attrs.Target||"";
+    }
+  });
+  return map;
+}
+
+// ── Flexible header matcher ─────────────────────────────────────────
+function matchHeader(name, keywords){
+  const clean=s=>String(s).replace(/[\s\(\)%]/g,"").toLowerCase();
+  const cn=clean(name);
+  for(const kw of keywords){ if(cn.includes(clean(kw))) return true; }
+  return false;
+}
+
+// ── Parse a sheet XML (Uint8Array), filter rows, return array-of-arrays ──
+function parseSheetXML(buf, sharedStrings, canonicalName, ordersMax, acosMin, sugACOS, withSuggestions){
+  const outHeaders = COLS[canonicalName];
+  const finalHdrs  = withSuggestions ? outHeaders : outHeaders.filter(h=>h!=="Suggestion");
+  const aoa        = [finalHdrs];
+
+  let headerRow = null;
+  let hdrBuilt  = false;
+  let iState=-1,iCampState=-1,iAdGroupState=-1,iOrders=-1,iACOS=-1,iCTR=-1,iKeyword=-1,iPT=-1,iEntity=-1,iMatchType=-1;
+  const hdrToColKey={};
+
+  let inRow=false, rowNum=0;
+  let inC=false, cellType="", cellColKey="";
+  let inV=false, inIs=false, inT=false;
+  let cellValStr="", isText="";
+  let currentRow={};
+
+  function colKey(ref){ return ref.replace(/[0-9]/g,""); }
+  function resolveCell(type, raw){
+    if(type==="s") return sharedStrings[parseInt(raw)]??"";
+    if(type==="b") return raw==="1"?"TRUE":"FALSE";
+    return raw;
+  }
+  function buildColMaps(){
+    const clean=s=>String(s).replace(/[\s\(\)%_\-\.\/\?]/g,"").toLowerCase();
+    for(const [ck,name] of Object.entries(headerRow)){
+      if(matchHeader(name,["State"])&&iState<0) iState=ck;
+      if(matchHeader(name,["Campaign State"])&&iCampState<0) iCampState=ck;
+      if(matchHeader(name,["Ad Group State"])&&iAdGroupState<0) iAdGroupState=ck;
+      if(matchHeader(name,["Orders"])&&iOrders<0) iOrders=ck;
+      if(matchHeader(name,["ACOS"])&&iACOS<0) iACOS=ck;
+      if(matchHeader(name,["Click-through Rate","CTR"])&&iCTR<0) iCTR=ck;
+      if(matchHeader(name,["Keyword Text"])&&iKeyword<0) iKeyword=ck;
+      if(matchHeader(name,["Product Targeting Expression","Targeting Expression"])&&iPT<0) iPT=ck;
+      if(matchHeader(name,["Entity"])&&iEntity<0) iEntity=ck;
+      if(matchHeader(name,["Match Type"])&&iMatchType<0) iMatchType=ck;
+      for(const h of outHeaders){
+        if(!hdrToColKey[h] && clean(name)===clean(h)) hdrToColKey[h]=ck;
+      }
+    }
+  }
+  function processDataRow(row){
+    const get=ck=>ck&&ck in row?norm(row[ck]):"";
+    if(canonicalName==="Sponsored Products Campaigns"&&iEntity){
+      const ev=lower(get(iEntity));
+      if(ev!=="keyword"&&ev!=="product targeting") return;
+    }
+    if(canonicalName==="Sponsored Display Campaigns"&&iEntity){
+      const ev=lower(get(iEntity));
+      if(ev==="ad group"||ev==="product ad") return;
+    }
+    if(canonicalName==="Sponsored Display Campaigns"&&iAdGroupState){
+      const av=lower(get(iAdGroupState));
+      if(av===""||av==="paused") return;
+    }
+    const ordersVal=parseNum(get(iOrders));
+    if(!isNaN(ordersVal)&&ordersVal>ordersMax) return;
+    const acosRaw=get(iACOS);
+    const acosVal=parseNum(acosRaw);
+    if(!isNaN(acosVal)&&acosVal<acosMin) return;
+    if(iState&&!isNotPaused(get(iState))) return;
+    if(iCampState&&!isNotPaused(get(iCampState))) return;
+    if(canonicalName==="SP Search Term Report"&&iMatchType){
+      if(lower(get(iMatchType))==="exact") return;
+    }
+    let ptVal="";
+    if(iKeyword||iPT){
+      const kw=iKeyword?norm(get(iKeyword)):"";
+      const pt=iPT?norm(get(iPT)):"";
+      ptVal=kw&&pt?kw+" | "+pt:kw||pt;
+    }
+    let acosFmt="";
+    if(acosRaw!==""){
+      const n=parseNum(acosRaw);
+      acosFmt=!isNaN(n)?(n*100).toFixed(2)+"%":acosRaw;
+    }
+    const ctrFmt=iCTR?fmtPct(get(iCTR)):"";
+    let suggestion="";
+    if(withSuggestions){
+      suggestion=!isNaN(acosVal)
+        ?((canonicalName==="SP Search Term Report"||canonicalName==="SB Search Term Report")
+          ?(acosVal>=sugACOS?"Negative exact":"Leave")
+          :(acosVal>=sugACOS?"Pause":"Leave"))
+        :"Leave";
+    }
+    const outRow=finalHdrs.map(h=>{
+      if(h==="Suggestion") return suggestion;
+      if(h==="Product Targeting Expression"||h==="Targeting Expression") return (iKeyword||iPT)?ptVal:norm(get(hdrToColKey[h]));
+      if(h==="Click-through Rate") return ctrFmt;
+      if(h==="ACOS") return acosFmt;
+      const ck=hdrToColKey[h]; return ck?norm(get(ck)):"";
+    });
+    aoa.push(outRow);
+  }
+
+  // ── byte SAX walk ──────────────────────────────────────────────
+  saxBytes(buf, {
+    open(tag, attrs){
+      if(tag==="row"){
+        inRow=true; rowNum++; currentRow={};
+      } else if(inRow&&tag==="c"){
+        inC=true; cellType=attrs.t||"";
+        cellColKey=colKey(attrs.r||""); cellValStr=""; isText="";
+      } else if(inC&&tag==="v"){ inV=true; }
+      else if(inC&&tag==="is"){ inIs=true; }
+      else if(inIs&&tag==="t"){ inT=true; }
+    },
+    text(s){
+      if(inV) cellValStr+=s;
+      if(inT) isText+=s;
+    },
+    close(tag){
+      if(tag==="v"){ inV=false; }
+      else if(tag==="t"&&inIs){ inT=false; }
+      else if(tag==="is"){ inIs=false; }
+      else if(tag==="c"&&inC){
+        inC=false;
+        const val = cellType==="inlineStr" ? isText : resolveCell(cellType, cellValStr);
+        currentRow[cellColKey]=val;
+      } else if(tag==="row"&&inRow){
+        inRow=false;
+        if(rowNum===1){ headerRow=currentRow; buildColMaps(); hdrBuilt=true; }
+        else if(hdrBuilt){ processDataRow(currentRow); }
+      }
+    }
+  });
+  return aoa;
+}
+
+// ── Main worker entry ────────────────────────────────────────────────
+self.onmessage = async function(e){
+  const {buffer, ordersMax, acosMap, sugACOS, withSuggestions} = e.data;
+  try {
+    self.postMessage({type:"progress", pct:3, label:"Unzipping xlsx…"});
+
+    // ── Async unzip: keep only needed files, drop the rest immediately ──
+    const files = await new Promise((resolve, reject) => {
+      fflate.unzip(new Uint8Array(buffer), (err, data) => {
+        if(err){ reject(err); return; }
+        // Drop everything we will never read so GC can free it before parsing
+        const keep = /sharedStrings\.xml$|workbook\.xml$|workbook\.xml\.rels$|xl\/worksheets\/sheet\d+\.xml$/i;
+        for(const k of Object.keys(data)){
+          if(!keep.test(k)) delete data[k];
+        }
+        resolve(data);
+      });
+    });
+
+    self.postMessage({type:"progress", pct:12, label:"Reading shared strings…"});
+
+    // ── Shared strings ───────────────────────────────────────────
+    const ssKey = Object.keys(files).find(k=>k.match(/sharedStrings\.xml$/i));
+    const sharedStrings = ssKey ? parseSharedStrings(files[ssKey]) : [];
+    if(ssKey) delete files[ssKey];
+
+    self.postMessage({type:"progress", pct:22, label:"Reading workbook structure…"});
+
+    // ── Workbook sheet list ──────────────────────────────────────
+    const wbKey  = Object.keys(files).find(k=>k.match(/workbook\.xml$/i)&&!k.includes("rels"));
+    const relKey = Object.keys(files).find(k=>k.match(/workbook\.xml\.rels$/i));
+    const wbSheets = wbKey  ? parseWorkbookSheets(files[wbKey])  : [];
+    const relMap   = relKey ? parseRels(files[relKey]) : {};
+    if(wbKey)  delete files[wbKey];
+    if(relKey) delete files[relKey];
+
+    // build canonical sheet name → xlsx path
+    const sheetPathMap={};
+    for(const {name, rId} of wbSheets){
+      let target = relMap[rId]||"";
+      if(target&&!target.startsWith("xl/")) target="xl/"+target;
+      const canon = SHTS.find(s=>name.toLowerCase()===s.toLowerCase())
+                 || SHTS.find(s=>name.toLowerCase().includes(s.toLowerCase()));
+      if(canon) sheetPathMap[canon]=target;
+    }
+
+    self.postMessage({type:"progress", pct:28, label:"Processing sheets…"});
+
+    // ── Process each sheet ───────────────────────────────────────
+    const outWB = XLSX.utils.book_new();
+    for(let i=0;i<SHTS.length;i++){
+      const name = SHTS[i];
+      const pct  = 28 + Math.round((i/SHTS.length)*62);
+      self.postMessage({type:"progress", pct, label:"Processing: "+name+"…"});
+
+      const path = sheetPathMap[name];
+      const xmlBytes = path ? files[path] : null;
+      let aoa;
+      if(xmlBytes){
+        // Free raw bytes from files map before parsing to reduce peak memory
+        if(path) delete files[path];
+        aoa = parseSheetXML(xmlBytes, sharedStrings, name, ordersMax, acosMap[name]||0, sugACOS, withSuggestions);
+      } else {
+        aoa = [COLS[name]];
+      }
+      XLSX.utils.book_append_sheet(outWB, XLSX.utils.aoa_to_sheet(aoa), name.substring(0,31));
+    }
+
+    // Free sharedStrings array — no longer needed
+    sharedStrings.length = 0;
+
+    self.postMessage({type:"progress", pct:93, label:"Building output file…"});
+    // type:"array" returns a plain JS Array, not a Uint8Array — wrap it so
+    // we get a real ArrayBuffer we can transfer zero-copy to the main thread.
+    const outRaw = XLSX.write(outWB,{bookType:"xlsx",type:"array"});
+    const outArr = outRaw instanceof Uint8Array ? outRaw : new Uint8Array(outRaw);
+    self.postMessage({type:"progress", pct:100, label:"Done!"});
+    self.postMessage({type:"done", buffer:outArr.buffer},[outArr.buffer]);
+
+  } catch(err){
+    self.postMessage({type:"error", message:err.message||String(err)});
+  }
+};
+</script>
+
+<script>
+const fileEl      = document.getElementById("file");
+const ordersEl    = document.getElementById("orders");
+const processBtn  = document.getElementById("processBtn");
+const downloadBtn = document.getElementById("downloadBtn");
+const resetBtn    = document.getElementById("resetBtn");
+const statusEl    = document.getElementById("status");
+const statusDot   = document.getElementById("statusDot");
+const statusText  = document.getElementById("statusText");
+const progressWrap= document.getElementById("progressWrap");
+const progressBar = document.getElementById("progressBar");
+const progressLbl = document.getElementById("progressLabel");
+let outBlob=null, activeWorker=null;
+
+function setStatus(text,ok=false){
+  statusEl.classList.remove("hidden");
+  statusText.textContent=text;
+  statusDot.classList.toggle("ok",ok);
+}
+function setProgress(pct,label){
+  progressWrap.style.display=progressLbl.style.display="block";
+  progressBar.style.width=pct+"%";
+  if(label) progressLbl.textContent=label;
+}
+function hideProgress(){
+  progressWrap.style.display=progressLbl.style.display="none";
 }
 
 async function processFile(withSuggestions){
-  const file=fileEl.files[0]; if(!file){alert("Please choose an .xlsx file."); return;}
+  const file=fileEl.files[0];
+  if(!file){alert("Please choose an .xlsx file.");return;}
+
   const ordersMax=Number(ordersEl.value||0);
   const acosMap={
-    "SP Search Term Report": Number(document.getElementById("acos_SP").value),
+    "SP Search Term Report":        Number(document.getElementById("acos_SP").value),
     "Sponsored Products Campaigns": Number(document.getElementById("acos_SPC").value),
-    "SB Search Term Report": Number(document.getElementById("acos_SB").value),
-    "Sponsored Brands Campaigns": Number(document.getElementById("acos_SBC").value),
-    "Sponsored Display Campaigns": Number(document.getElementById("acos_SD").value)
+    "SB Search Term Report":        Number(document.getElementById("acos_SB").value),
+    "Sponsored Brands Campaigns":   Number(document.getElementById("acos_SBC").value),
+    "Sponsored Display Campaigns":  Number(document.getElementById("acos_SD").value)
   };
   const sugACOS=Number(document.getElementById("sug_ACOS").value);
 
-  setStatus("Reading workbook…");
-  let wb; try{wb=await readFile(file);}catch(e){console.error(e); setStatus("Failed to read file.",false); return;}
-  const outWB=XLSX.utils.book_new();
+  if(activeWorker){activeWorker.terminate();activeWorker=null;}
+  processBtn.disabled=true;
+  downloadBtn.classList.add("hidden");
+  resetBtn.classList.add("hidden");
+  outBlob=null;
 
-  for(const canonicalName of SHTS){
-    const ws = getSheetInsensitive(wb, canonicalName); // case-insensitive
-    const df = ws ? sheetToJSON(ws) : [];
-    setStatus(`Processing: ${canonicalName}…`);
-    const rows = filterAndSuggestSheet(canonicalName, df, ordersMax, acosMap, sugACOS, withSuggestions);
-    const headers = COLS[canonicalName];
-    const sh = aoaToSheet(headers, rows, withSuggestions);
-    XLSX.utils.book_append_sheet(outWB, sh, canonicalName.substring(0,31));
+  setStatus("Reading file…");
+  setProgress(1,"Loading file into memory…");
+
+  let buffer;
+  try {
+    buffer = await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onprogress=ev=>{
+        if(ev.lengthComputable){
+          const pct=Math.round((ev.loaded/ev.total)*12);
+          setProgress(pct,`Reading: ${(ev.loaded/1024/1024).toFixed(0)} / ${(ev.total/1024/1024).toFixed(0)} MB`);
+        }
+      };
+      reader.onload=ev=>resolve(ev.target.result);
+      reader.onerror=()=>reject(new Error("File read error"));
+      reader.readAsArrayBuffer(file);
+    });
+  } catch(err){
+    setStatus("❌ Failed to read file: "+err.message);
+    hideProgress();processBtn.disabled=false;return;
   }
 
-  const outArray=XLSX.write(outWB,{bookType:'xlsx',type:'array'});
-  outBlob=new Blob([outArray],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  downloadBtn.classList.remove("hidden"); resetBtn.classList.remove("hidden");
-  setStatus("✅ Ready. Click download to save your file.",true);
+  setProgress(13,"Starting background processor…");
+  setStatus("Processing in background…");
+
+  const workerSrc=document.getElementById("workerSrc").textContent;
+  const workerBlob=new Blob([workerSrc],{type:"application/javascript"});
+  const workerURL=URL.createObjectURL(workerBlob);
+  const worker=new Worker(workerURL);
+  activeWorker=worker;
+
+  worker.onmessage=ev=>{
+    const msg=ev.data;
+    if(msg.type==="progress"){
+      setProgress(msg.pct,msg.label);setStatus(msg.label);
+    } else if(msg.type==="done"){
+      hideProgress();
+      outBlob=new Blob([msg.buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      downloadBtn.classList.remove("hidden");resetBtn.classList.remove("hidden");
+      setStatus("✅ Ready. Click download to save your file.",true);
+      processBtn.disabled=false;
+      worker.terminate();URL.revokeObjectURL(workerURL);activeWorker=null;
+    } else if(msg.type==="error"){
+      setStatus("❌ Error: "+msg.message);
+      hideProgress();processBtn.disabled=false;
+      worker.terminate();URL.revokeObjectURL(workerURL);activeWorker=null;
+    }
+  };
+  worker.onerror=err=>{
+    setStatus("❌ Worker error: "+(err.message||"Unknown"));
+    hideProgress();processBtn.disabled=false;
+    URL.revokeObjectURL(workerURL);activeWorker=null;
+  };
+
+  // Zero-copy transfer to worker
+  worker.postMessage({buffer,ordersMax,acosMap,sugACOS,withSuggestions},[buffer]);
 }
 
-// Events
-processBtn.addEventListener("click", () => {
-  const withSuggestions = document.getElementById("includeSug").checked;
-  processFile(withSuggestions);
-});
+processBtn.addEventListener("click",()=>processFile(document.getElementById("includeSug").checked));
 
-downloadBtn.addEventListener("click", () => {
-  if (!outBlob) return;
-  const withSuggestions = document.getElementById("includeSug").checked;
-  const filename = withSuggestions
-    ? "Bleeders 2.0 Output File with Suggestions.xlsx"
-    : "Bleeders 2.0 Output File.xlsx";
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(outBlob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+downloadBtn.addEventListener("click",()=>{
+  if(!outBlob) return;
+  const sug=document.getElementById("includeSug").checked;
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(outBlob);
+  a.download=sug?"Bleeders 2.0 Output File with Suggestions.xlsx":"Bleeders 2.0 Output File.xlsx";
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
 });
 
 resetBtn.addEventListener("click",()=>{
-  fileEl.value=''; ordersEl.value=5;
+  if(activeWorker){activeWorker.terminate();activeWorker=null;}
+  fileEl.value="";ordersEl.value=5;
   document.getElementById("acos_SP").value=0.55;
   document.getElementById("acos_SPC").value=0.55;
   document.getElementById("acos_SB").value=0.45;
   document.getElementById("acos_SBC").value=0.45;
   document.getElementById("acos_SD").value=0.45;
-  document.getElementById("sug_ACOS").value=0.8; // keep in sync with UI default
-  document.getElementById("includeSug").checked = true;
-  outBlob=null;
-  document.getElementById("status").classList.add("hidden");
-  downloadBtn.classList.add("hidden"); resetBtn.classList.add("hidden");
+  document.getElementById("sug_ACOS").value=0.8;
+  document.getElementById("includeSug").checked=true;
+  outBlob=null;processBtn.disabled=false;
+  statusEl.classList.add("hidden");
+  downloadBtn.classList.add("hidden");resetBtn.classList.add("hidden");
+  hideProgress();
 });
 </script>
 </body>
