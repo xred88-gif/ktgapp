@@ -416,7 +416,7 @@ function parseTemplate(workbook) {
     const row = rawData[i];
     const fmtRow = fmtData[i] || [];
     if (!row || !row[0]) continue;
-    const campaign = String(row[0] || '').trim();
+    const campaign = String(row[0] || '').trim().replace(/\s+/g, ' ');
     if (!campaign) continue;
 
     // For columns V(21) W(22) X(23) Y(24): use formatted value if available so
@@ -674,14 +674,15 @@ function getColMap(headers) {
 
 function getCampaignName(row, cols) {
   let name = '';
-  if (cols.campaignNameInfo >= 0 && row[cols.campaignNameInfo]) name = String(row[cols.campaignNameInfo]).trim();
-  if (!name && cols.campaignName >= 0 && row[cols.campaignName]) name = String(row[cols.campaignName]).trim();
+  if (cols.campaignNameInfo >= 0 && row[cols.campaignNameInfo]) name = String(row[cols.campaignNameInfo]).trim().replace(/\s+/g, ' ');
+  if (!name && cols.campaignName >= 0 && row[cols.campaignName]) name = String(row[cols.campaignName]).trim().replace(/\s+/g, ' ');
   return name;
 }
 
 function matchesCampaign(rowName, tmplName) {
   if (!rowName || !tmplName) return false;
-  const r = rowName.toLowerCase(), t = tmplName.toLowerCase();
+  const r = rowName.replace(/\s+/g, ' ').toLowerCase();
+  const t = tmplName.replace(/\s+/g, ' ').toLowerCase();
   return r === t || r.includes(t) || t.includes(r);
 }
 
