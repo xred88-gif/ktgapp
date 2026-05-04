@@ -750,10 +750,10 @@ function buildLookup(srcRows,defLabel){
       kwId:          cell(row,C.kwId),
       ptId:          cell(row,C.ptId),
       portfolioId:   cell(row,C.portfolioId),
-      campName:      cell(row,C.campName)||cell(row,C.campNameInfo),
-      adgName:       cell(row,C.adgName)||cell(row,C.adgNameInfo),
-      campNameInfo:  cell(row,C.campNameInfo)||cell(row,C.campName),
-      adgNameInfo:   cell(row,C.adgNameInfo)||cell(row,C.adgName),
+      campName:      (cell(row,C.campName)||cell(row,C.campNameInfo)).replace(/\s+/g,' '),
+      adgName:       (cell(row,C.adgName)||cell(row,C.adgNameInfo)).replace(/\s+/g,' '),
+      campNameInfo:  (cell(row,C.campNameInfo)||cell(row,C.campName)).replace(/\s+/g,' '),
+      adgNameInfo:   (cell(row,C.adgNameInfo)||cell(row,C.adgName)).replace(/\s+/g,' '),
       portfolioName: cell(row,C.portfolioName),
       state:         cell(row,C.state),
       campState:     cell(row,C.campState),
@@ -1665,9 +1665,9 @@ function doProcess(){
       }
       if(!action){ counts.skipped++; continue; }
 
-      var campName = cell(slot.campIdx);                          // Col A(0) always
-      var adgName  = slot.adgIdx>=0 ? cell(slot.adgIdx) : '';   // Col B(1) — empty for SB Keywords
-      var term     = cell(slot.termIdx);                         // Col F(5) search tabs / Col B(1) SB Keywords / Col C(2) SP Targeting
+      var campName = cell(slot.campIdx).replace(/\s+/g,' ');                    // Col A(0) always — collapse internal whitespace (Excel spacing issues)
+      var adgName  = slot.adgIdx>=0 ? cell(slot.adgIdx).replace(/\s+/g,' ') : '';   // Col B(1) — empty for SB Keywords
+      var term     = cell(slot.termIdx);                                          // Col F(5) search tabs / Col B(1) SB Keywords / Col C(2) SP Targeting
 
       // matchType from Bleeders:
       // SP Targeting:  Col D(3) — used as lookup key
