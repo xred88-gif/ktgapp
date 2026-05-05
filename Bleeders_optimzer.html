@@ -997,9 +997,10 @@ function detectAction(raw){
   if(na.indexOf('negative')!==-1&&na.indexOf('exact')!==-1)  return 'neg_exact';
   if(na.indexOf('negative')!==-1&&na.indexOf('phrase')!==-1) return 'neg_phrase';
   if(na.indexOf('pause')!==-1) return 'pause';
-  // Reduce bid: "Reduce Bid 20%", "Reduce the Bids by 20%", "Lower Bid by 15%", "Bid -25", "Decrease Bid 30%"
-  var m=na.match(/(?:reduce|lower|decrease)\s+(?:the\s+)?bids?\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%?/);
-  if(!m) m=na.match(/(?:reduce|lower|decrease)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%?\s*(?:bid|bids)/);
+  // Reduce/Decrease bid — accepts all spellings: reduce, lower, decrease, decrase, dec, decr
+  var _decPat=/dec(?:r(?:e(?:a(?:s(?:e)?)?)?)?)?|decrase|lower|reduce/i;
+  var m=na.match(new RegExp('(?:'+_decPat.source+')\\s+(?:the\\s+)?bids?\\s+(?:by\\s+)?(\\d+(?:\\.\\d+)?)\\s*%?','i'));
+  if(!m) m=na.match(new RegExp('(?:'+_decPat.source+')\\s+(?:by\\s+)?(\\d+(?:\\.\\d+)?)\\s*%?\\s*(?:bid|bids)','i'));
   if(!m) m=na.match(/bid\s*[-\u2013]\s*(\d+(?:\.\d+)?)\s*%?/);
   if(!m) m=na.match(/bids?\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%/);
   if(m){ var pct=parseFloat(m[1]); if(pct>0&&pct<100) return 'reduce_bid:'+pct; }
@@ -1605,7 +1606,7 @@ function renderTabData(name){
           else if(nv.indexOf('negative phrase')!==-1)  td.className='act-phrase';
           else if(nv.indexOf('negative')!==-1)         td.className='act-neg';
           else if(nv.indexOf('pause')!==-1)            td.className='act-pause';
-          else if(nv.indexOf('reduce')!==-1||nv.indexOf('lower bid')!==-1||nv.indexOf('decrease bid')!==-1) td.className='act-reduce';
+          else if(/dec(?:r(?:e(?:a(?:s(?:e)?)?)?)?)?|decrase|lower|reduce/i.test(val)||nv.indexOf('lower bid')!==-1||nv.indexOf('decrease bid')!==-1) td.className='act-reduce';
         } else if(c===slot.termIdx)                    td.className='td-key';
         else if(c===slot.campIdx)                      td.className='td-camp';
         else if(c===slot.adgIdx)                       td.className='td-adg';
