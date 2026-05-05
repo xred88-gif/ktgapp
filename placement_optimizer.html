@@ -102,7 +102,7 @@
     }
     .result-title { font-size: 1.15rem; font-weight: 700; color: white; margin-bottom: 1.1rem; }
 
-    .stats { display: grid; grid-template-columns: repeat(5,1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
+    .stats { display: grid; grid-template-columns: repeat(6,1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
     @media (max-width: 700px) { .stats { grid-template-columns: repeat(2,1fr); } }
     .stat { border-radius: 12px; padding: 0.85rem; text-align: center; }
     .stat.green  { background: rgba(34,197,94,0.1);   border: 1px solid rgba(34,197,94,0.25); }
@@ -110,18 +110,21 @@
     .stat.blue   { background: rgba(59,130,246,0.1);  border: 1px solid rgba(59,130,246,0.25); }
     .stat.purple { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.25); }
     .stat.red    { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.25); }
+    .stat.teal   { background: rgba(20,184,166,0.1); border: 1px solid rgba(20,184,166,0.25); }
     .stat-num { font-size: 1.8rem; font-weight: 800; line-height: 1; }
     .stat.green  .stat-num { color: #4ade80; }
     .stat.yellow .stat-num { color: #facc15; }
     .stat.blue   .stat-num { color: #60a5fa; }
     .stat.purple .stat-num { color: #c084fc; }
     .stat.red    .stat-num { color: #f87171; }
+    .stat.teal   .stat-num { color: #2dd4bf; }
     .stat-label { font-size: 0.68rem; margin-top: 5px; font-weight: 500; }
     .stat.green  .stat-label { color: #86efac; }
     .stat.yellow .stat-label { color: #fde047; }
     .stat.blue   .stat-label { color: #93c5fd; }
     .stat.purple .stat-label { color: #d8b4fe; }
     .stat.red    .stat-label { color: #fca5a5; }
+    .stat.teal   .stat-label { color: #99f6e4; }
 
     .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
     .btn-download {
@@ -135,6 +138,8 @@
     .btn-download.purple:hover { background: #9333ea; }
     .btn-download.red { background: #ef4444; box-shadow: 0 4px 14px rgba(239,68,68,0.3); }
     .btn-download.red:hover { background: #dc2626; }
+    .btn-download.teal { background: #14b8a6; box-shadow: 0 4px 14px rgba(20,184,166,0.3); }
+    .btn-download.teal:hover { background: #0d9488; }
     .btn-preview {
       display: flex; align-items: center; gap: 0.5rem;
       background: #334155; color: #e2e8f0; font-weight: 600; font-size: 0.9rem;
@@ -201,7 +206,7 @@
         </svg>
       </div>
       <div class="upload-label">Template File</div>
-      <div class="upload-desc">Col A: Campaign &bull; T: Placement &bull; U: Orig % &bull; V: New % &bull; W: Budget or "Reduce X%"</div>
+      <div class="upload-desc">Col A: Campaign &bull; T: Placement &bull; U: Orig % &bull; V: New % &bull; W: Budget, "Decrease X%" or "Increase X%"</div>
       <div id="templateStatus" class="upload-hint">Drop .xlsx / .xls here or click to browse</div>
     </label>
 
@@ -255,7 +260,11 @@
       </div>
       <div class="stat red">
         <div class="stat-num" id="statBids">0</div>
-        <div class="stat-label">Bids Reduced</div>
+        <div class="stat-label">Bids Decreased</div>
+      </div>
+      <div class="stat teal">
+        <div class="stat-num" id="statBidsInc">0</div>
+        <div class="stat-label">Bids Increased</div>
       </div>
     </div>
     <div class="btn-row">
@@ -275,7 +284,13 @@
         <svg fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="width:18px;height:18px">
           <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
         </svg>
-        Download Bids File
+        Download Bids Decreased File
+      </button>
+      <button class="btn-download teal" id="bidsIncBtn" onclick="downloadBidsInc()" style="display:none">
+        <svg fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24" style="width:18px;height:18px">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+        </svg>
+        Download Bids Increased File
       </button>
       <button class="btn-preview" onclick="togglePreview()">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:18px;height:18px">
@@ -339,6 +354,7 @@ var bulkWB     = null;
 var placementData = null;
 var budgetData = null;
 var bidsData = null;
+var bidsIncData = null;
 
 function dOver(e,id)  { e.preventDefault(); document.getElementById(id).classList.add('drag-over'); }
 function dLeave(id)   { document.getElementById(id).classList.remove('drag-over'); }
@@ -402,14 +418,15 @@ function parseTemplate(wb){
   var range=XLSX.utils.decode_range(sheet['!ref']||'A1');
   var placementRows=[];
   var budgetCampaigns={};
-  var reduceBidsCampaigns={};
+  var decreaseBidsCampaigns={};
+  var increaseBidsCampaigns={};
   
   for(var r=1;r<=range.e.r;r++){
     var cam=normCampaignName(cellVal(sheet,r,0)); if(!cam) continue;
     var plc=cellVal(sheet,r,19);         // Column T - Placement type
     var origVal=cellVal(sheet,r,20);     // Column U - original %
     var newVal=cellVal(sheet,r,21);      // Column V - new %
-    var colW=cellVal(sheet,r,22);        // Column W - budget OR reduce bids
+    var colW=cellVal(sheet,r,22);        // Column W - budget OR decrease/increase bids
     
     // Process placement rows (if placement column has value)
     if(plc){
@@ -432,16 +449,21 @@ function parseTemplate(wb){
       else if(byNumMatch) numValue = parseFloat(byNumMatch[1]);
       else if(anyNumMatch) numValue = parseFloat(anyNumMatch[1]);
       
-      if(colWLower.indexOf('reduce') !== -1 && numValue !== null){
-        // "reduce bids by 20%" or "reduce 10%" or "reduce by 5" -> extract percentage
-        reduceBidsCampaigns[cam] = numValue;
+      var isDecrease = /dec[r]?[e]?[a]?[s]?[e]?|decrase|lower|reduce/i.test(colW);
+      var isIncrease = /inc[r]?[e]?[a]?[s]?[e]?|incrase/i.test(colW);
+      if(isDecrease && numValue !== null){
+        // matches: decrease, decrase, lower, reduce, dec, decr, etc.
+        decreaseBidsCampaigns[cam] = numValue;
+      } else if(isIncrease && numValue !== null){
+        // matches: increase, incrase, inc, incr, etc.
+        increaseBidsCampaigns[cam] = numValue;
       } else if((colWLower.indexOf('budget') !== -1 || !isNaN(parseFloat(colW))) && numValue !== null){
         // "Budget 50" or just "50" -> budget value
         budgetCampaigns[cam] = numValue;
       }
     }
   }
-  return {placementRows:placementRows, budgetCampaigns:budgetCampaigns, reduceBidsCampaigns:reduceBidsCampaigns};
+  return {placementRows:placementRows, budgetCampaigns:budgetCampaigns, decreaseBidsCampaigns:decreaseBidsCampaigns, increaseBidsCampaigns:increaseBidsCampaigns};
 }
 
 function parseBulk(wb){
@@ -490,8 +512,8 @@ function runProcess(){
   setTimeout(function(){
     try{
       var tmpl=parseTemplate(templateWB);
-      if(!tmpl.placementRows.length && Object.keys(tmpl.budgetCampaigns).length===0 && Object.keys(tmpl.reduceBidsCampaigns).length===0){
-        throw new Error('No data found in template. Ensure row 2+ has data in columns A, T, U, V (placement) or W (budget/reduce bids).');
+      if(!tmpl.placementRows.length && Object.keys(tmpl.budgetCampaigns).length===0 && Object.keys(tmpl.decreaseBidsCampaigns).length===0 && Object.keys(tmpl.increaseBidsCampaigns).length===0){
+        throw new Error('No data found in template. Ensure row 2+ has data in columns A, T, U, V (placement) or W (budget/decrease/increase bids).');
       }
 
       var bulk=parseBulk(bulkWB);
@@ -552,20 +574,20 @@ function runProcess(){
         });
       }
 
-      // Process Reduce Bids (Keyword and Product Targeting rows)
+      // Process Decrease Bids (Keyword and Product Targeting rows)
       var bidsOutRows=[];
-      var reduceCampaignNames = Object.keys(tmpl.reduceBidsCampaigns);
-      if(reduceCampaignNames.length > 0){
+      var decreaseCampaignNames = Object.keys(tmpl.decreaseBidsCampaigns);
+      if(decreaseCampaignNames.length > 0){
         bulk.rows.forEach(function(row){
           var entity=String(row['Entity']||'').trim().toLowerCase();
           var product=String(row['Product']||'').trim().toLowerCase();
           if(product==='sponsored products' && (entity==='keyword' || entity==='product targeting')){
             var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
-            if(tmpl.reduceBidsCampaigns[cam] !== undefined){
-              var reducePercent = tmpl.reduceBidsCampaigns[cam];
+            if(tmpl.decreaseBidsCampaigns[cam] !== undefined){
+              var decreasePercent = tmpl.decreaseBidsCampaigns[cam];
               var currentBid = parseFloat(row['Bid']);
               if(!isNaN(currentBid) && currentBid > 0){
-                var newBid = currentBid * (1 - reducePercent / 100);
+                var newBid = currentBid * (1 - decreasePercent / 100);
                 newBid = Math.round(newBid * 100) / 100; // Round to 2 decimals
                 if(newBid < 0.02) newBid = 0.02; // Amazon minimum bid
                 var nr=Object.assign({},row);
@@ -581,6 +603,33 @@ function runProcess(){
       placementData={headers:bulk.headers,rows:placementOutRows,updated:updated,skipped:skipped,total:placementOutRows.length};
       budgetData={headers:bulk.headers,rows:budgetOutRows,count:budgetOutRows.length};
       bidsData={headers:bulk.headers,rows:bidsOutRows,count:bidsOutRows.length};
+
+      // Process Increase Bids (Keyword and Product Targeting rows)
+      var bidsIncOutRows=[];
+      var increaseCampaignNames = Object.keys(tmpl.increaseBidsCampaigns);
+      if(increaseCampaignNames.length > 0){
+        bulk.rows.forEach(function(row){
+          var entity=String(row['Entity']||'').trim().toLowerCase();
+          var product=String(row['Product']||'').trim().toLowerCase();
+          if(product==='sponsored products' && (entity==='keyword' || entity==='product targeting')){
+            var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
+            if(tmpl.increaseBidsCampaigns[cam] !== undefined){
+              var increasePercent = tmpl.increaseBidsCampaigns[cam];
+              var currentBid = parseFloat(row['Bid']);
+              if(!isNaN(currentBid) && currentBid > 0){
+                var newBid = currentBid * (1 + increasePercent / 100);
+                newBid = Math.round(newBid * 100) / 100;
+                var nr=Object.assign({},row);
+                nr['Bid'] = newBid;
+                nr['Operation'] = 'Update';
+                bidsIncOutRows.push(nr);
+              }
+            }
+          }
+        });
+      }
+      bidsIncData={headers:bulk.headers,rows:bidsIncOutRows,count:bidsIncOutRows.length};
+
       showResult();
     }catch(err){ showError(err.message||String(err)); }
 
@@ -596,11 +645,13 @@ function showResult(){
   document.getElementById('statTotal').textContent=placementData.total;
   document.getElementById('statBudget').textContent=budgetData.count;
   document.getElementById('statBids').textContent=bidsData.count;
+  document.getElementById('statBidsInc').textContent=bidsIncData.count;
   
   // Show/hide download buttons based on data
   document.getElementById('placementBtn').style.display = placementData.total > 0 ? '' : 'none';
   document.getElementById('budgetBtn').style.display = budgetData.count > 0 ? '' : 'none';
   document.getElementById('bidsBtn').style.display = bidsData.count > 0 ? '' : 'none';
+  document.getElementById('bidsIncBtn').style.display = bidsIncData.count > 0 ? '' : 'none';
   
   var COLS=['Product','Entity','Operation','Campaign Name (Informational only)','Placement','Percentage'];
   var bRows=placementData.rows.slice(0,50);
@@ -699,8 +750,28 @@ function downloadBids(){
   setTimeout(function(){URL.revokeObjectURL(url);a.remove();},1500);
 }
 
+function downloadBidsInc(){
+  if(!bidsIncData || !bidsIncData.rows.length) return;
+  var data=[bidsIncData.headers].concat(
+    bidsIncData.rows.map(function(r){
+      return bidsIncData.headers.map(function(h){return r[h]!==undefined?r[h]:'';});
+    })
+  );
+  var ws=XLSX.utils.aoa_to_sheet(data);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Sponsored Products Campaigns');
+  var buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;
+  a.download='BidsIncrease_'+getTodayDate()+'.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);a.remove();},1500);
+}
+
 function showError(msg){ document.getElementById('errorMsg').textContent=msg; document.getElementById('errorBox').style.display='flex'; }
-function hideError(){ document.getElementById('errorBox').style.display='none'; }
-</script>
+function hideError(){ document.getElementById('errorBox').style.display='none'; }</script>
 </body>
 </html>
