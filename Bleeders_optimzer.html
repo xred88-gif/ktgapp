@@ -243,6 +243,12 @@
     </div>
     <div class="dl-grid" id="dl-grid"></div>
 
+    <div id="warnings-block" style="display:none;margin:20px 0 0;padding:14px 16px;background:#1e1a1a;border:1px solid #f87171;border-radius:8px">
+      <div style="font-weight:700;color:#f87171;margin-bottom:10px;font-size:14px">⚠ Terms Not Found in Source — These rows were NOT added to any output file</div>
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:10px">These terms do not exist in your Source bulk file for the listed campaigns. They have been skipped entirely. Check your Bleeders template — the campaign name or term may be wrong, or the campaign may not have this targeting in the Source yet.</p>
+      <div class="tbl-wrap" style="max-height:280px"><table id="warnings-tbl" style="font-size:12px"></table></div>
+    </div>
+
     <!-- Bid Reduction files — separate section -->
     <div id="sec-reduce-dl" class="hidden" style="margin-top:24px">
       <div class="section-title" style="color:#34d399">💰 Download Bid Reduction Files</div>
@@ -750,8 +756,8 @@ function buildLookup(srcRows,defLabel){
       kwId:          cell(row,C.kwId),
       ptId:          cell(row,C.ptId),
       portfolioId:   cell(row,C.portfolioId),
-      campName:      (cell(row,C.campName)||cell(row,C.campNameInfo)).replace(/\s+/g,' '),
-      adgName:       (cell(row,C.adgName)||cell(row,C.adgNameInfo)).replace(/\s+/g,' '),
+      campName:      (cell(row,C.campNameInfo)||cell(row,C.campName)).replace(/\s+/g,' '),
+      adgName:       (cell(row,C.adgNameInfo)||cell(row,C.adgName)).replace(/\s+/g,' '),
       campNameInfo:  (cell(row,C.campNameInfo)||cell(row,C.campName)).replace(/\s+/g,' '),
       adgNameInfo:   (cell(row,C.adgNameInfo)||cell(row,C.adgName)).replace(/\s+/g,' '),
       portfolioName: cell(row,C.portfolioName),
@@ -923,9 +929,9 @@ function buildNegSet(srcRows){
     if(!row||!row.some(function(c){return S(c);})) continue;
     var ent=cell(row,entityCol);
     if(ent!=='negative keyword'&&ent!=='negative product targeting') continue;
-    // Use informational columns as fallback when direct columns are empty
-    var c=cell(row,campCol)||cell(row,campInfoCol);
-    var a=cell(row,adgCol) ||cell(row,adgInfoCol);
+    // Informational only columns are always filled; direct columns are blank on neg rows
+    var c=cell(row,campInfoCol)||cell(row,campCol);
+    var a=cell(row,adgInfoCol) ||cell(row,adgCol);
     var k=cell(row,kwCol)||cell(row,ptCol);
     if(!k) continue;
     neg[c+'||'+a+'||'+k]=true;
@@ -1637,7 +1643,8 @@ function processAll(){
 function doProcess(){
   DEFS.forEach(function(d){ G.buckets[d.id].rows=[]; });
   REDUCE_DEFS.forEach(function(d){ G.reduceBuckets[d.id].rows=[]; });
-  var counts={total:0,negExact:0,negPhrase:0,negPt:0,pause:0,reduceBid:0,skipped:0,matched:0,noMatch:0,skippedDupNeg:0,skippedDup:0};
+  var counts={total:0,negExact:0,negPhrase:0,negPt:0,pause:0,reduceBid:0,skipped:0,matched:0,skippedDupNeg:0,skippedDup:0,notInSource:0};
+  var notInSourceWarnings=[];
   var prev=[['Tab','A:Campaign','B:AdGroup','C/F:Term','Action',
              'Found?','How','Entity','CampID','AdGrpID','KwID','PTID',
              '→KwText','→MatchType','→PTExpr','→Bid (was→new)']];
@@ -1704,7 +1711,6 @@ function doProcess(){
       if(found){
         rec = found.rec;
         how = found.how;
-        counts.matched++;
 
         // Enrich: if source kwText is empty but bleeder has term (non-PT), fill it
         if(!S(rec.kwText) && term && !isPtTerm(term)){
@@ -1714,31 +1720,59 @@ function doProcess(){
         if(!S(rec.matchType) && bleederMatchType){
           rec = Object.assign({}, rec, {matchType: bleederMatchType});
         }
+
+        // ── Cross-campaign ID guard ──────────────────────────────────────
+        // T5/T6/T6b are single-term fallbacks that may match a record from a
+        // DIFFERENT campaign. If the matched record's campaign name doesn't
+        // agree with the bleeder's campaign name, the term does NOT exist in
+        // the source for this campaign — skip the row entirely and warn the user.
+        // Outputting it with wrong IDs would create a duplicate error on Amazon;
+        // outputting it with empty IDs would add the negative to the wrong place.
+        var isSingleFallback = (how==='T5:kw+mt'||how==='T6:single'||
+                                how==='T6b:single-alt'||how==='T6b:double-alt'||
+                                how==='T6b:triple-alt'||how==='T6b:quad-alt');
+        if(isSingleFallback){
+          var recCampNorm = NT(S(rec.campName)||S(rec.campNameInfo)||'');
+          var blCampNorm  = NT(campName||'');
+          if(blCampNorm && recCampNorm && recCampNorm !== blCampNorm){
+            counts.notInSource++;
+            counts.skipped++;
+            notInSourceWarnings.push({
+              tab:   def.label,
+              camp:  campName,
+              adg:   adgName,
+              term:  term,
+              action:actionStr
+            });
+            prev.push([
+              def.label,
+              campName||'—', adgName||'—', term||'—', actionStr,
+              '⚠', 'NOT IN SOURCE — skipped', '',
+              '—','—','—','—','—','—','—',''
+            ]);
+            continue;
+          }
+        }
+        counts.matched++;
       } else {
-        // No match found — use bleeder values as fallback (IDs will be empty)
-        rec = {
-          entity:'', campId:'', adgId:'', kwId:'', ptId:'', portfolioId:'',
-          campName:campName, adgName:adgName,
-          campNameInfo:campName, adgNameInfo:adgName, portfolioName:'',
-          state:'', campState:'', adgState:'',
-          bid:'', adgDefaultBid:'', dailyBudget:'',
-          startDate:'', endDate:'', targetingType:'',
-          matchType: bleederMatchType,
-          biddingStrat:'', placement:'', percentage:'',
-          sku:'', asin:'',
-          custST:term, kwText:term,
-          ptExpr:'', resolvedPt:'',
-          draftCampId:'', budgetType:'', bidOpt:'', bidMult:'',
-          adFormat:'', landingUrl:'', landingAsins:'',
-          brandEntityId:'', brandName:'', brandLogoId:'', customImgId:'',
-          creativeHl:'', creativeAsins:'', videoIds:'', creativeType:'',
-          targetingId:'', tactic:'', costType:'', sdTargetExpr:'', sdResolvedTE:'',
-          impressions:'', sdClicks:'', sdCtr:'', sdSpend:'', sdSales:'', sdOrders:'',
-          sdUnits:'', sdCvr:'', sdAcos:'', sdCpc:'', sdRoas:'',
-          viewableImps:'', salesVC:'', ordersVC:'', unitsVC:'', acosVC:'', roasVC:''
-        };
-        how = 'no match';
-        counts.noMatch++;
+        // Term not found in source at all — skip row and warn. Never output
+        // incomplete/empty-ID rows as they cannot be safely uploaded.
+        counts.notInSource++;
+        counts.skipped++;
+        notInSourceWarnings.push({
+          tab:   def.label,
+          camp:  campName,
+          adg:   adgName,
+          term:  term,
+          action:actionStr
+        });
+        prev.push([
+          def.label,
+          campName||'—', adgName||'—', term||'—', actionStr,
+          '⚠', 'NOT IN SOURCE — skipped', '',
+          '—','—','—','—','—','—','—',''
+        ]);
+        continue;
       }
 
       var outRow = buildOutputRow(def, rec, action, term, campName, adgName, reducePct);
@@ -1785,27 +1819,27 @@ function doProcess(){
     }
   });
 
-  showResults(counts, prev);
+  showResults(counts, prev, notInSourceWarnings);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SHOW RESULTS
 // ═══════════════════════════════════════════════════════════════════════════
-function showResults(counts,prev){
+function showResults(counts,prev,notInSourceWarnings){
   setStep(3);
   hide('sec-preview'); show('sec-results');
 
   var filesWithData=DEFS.filter(function(d){return G.buckets[d.id].rows.length>0;}).length;
 
   document.getElementById('stats-grid').innerHTML=[
-    {l:'Total Rows', n:counts.total,           c:''},
-    {l:'Neg Exact',  n:counts.negExact,        c:'red'},
-    {l:'Neg Phrase', n:counts.negPhrase,       c:'purple'},
-    {l:'Neg PT',     n:counts.negPt,           c:'blue'},
-    {l:'Paused',     n:counts.pause,           c:'yellow'},
-    {l:'💰 Bid Reduced', n:counts.reduceBid,   c:'green'},
-    {l:'✓ Matched',  n:counts.matched,         c:'green'},
-    {l:'✗ No Match', n:counts.noMatch,         c:''},
+    {l:'Total Rows', n:counts.total,              c:''},
+    {l:'Neg Exact',  n:counts.negExact,           c:'red'},
+    {l:'Neg Phrase', n:counts.negPhrase,          c:'purple'},
+    {l:'Neg PT',     n:counts.negPt,              c:'blue'},
+    {l:'Paused',     n:counts.pause,              c:'yellow'},
+    {l:'💰 Bid Reduced',    n:counts.reduceBid,   c:'green'},
+    {l:'✓ Matched',         n:counts.matched,     c:'green'},
+    {l:'⚠ Not in Source',   n:counts.notInSource, c:counts.notInSource>0?'red':''},
     {l:'⛔ Dup Neg Skipped', n:counts.skippedDupNeg, c:'yellow'},
     {l:'⛔ Dup Row Skipped', n:counts.skippedDup,    c:'yellow'}
   ].map(function(s){
@@ -1819,17 +1853,39 @@ function showResults(counts,prev){
       '✓ <strong>'+counts.total+' rows</strong> → <strong>'+filesWithData+' file(s)</strong> · '+
       '<span style="color:#4ade80">'+counts.matched+' matched from Source</span>'+
       (counts.reduceBid>0?' · <span style="color:#34d399">💰 '+counts.reduceBid+' bid(s) reduced</span>':'')+
-      (counts.noMatch>0
-        ?' · <span style="color:#fbbf24">⚠ '+counts.noMatch+' not found in Source (IDs will be empty)</span>'
+      (counts.notInSource>0
+        ?' · <span style="color:#f87171">⚠ '+counts.notInSource+' term(s) NOT found in Source — skipped, see warnings below</span>'
         :' · All rows matched ✓')+
       (counts.skippedDupNeg>0
-        ?' · <span style="color:#fbbf24">⛔ '+counts.skippedDupNeg+' neg exact/phrase already in Source — skipped</span>'
+        ?' · <span style="color:#fbbf24">⛔ '+counts.skippedDupNeg+' neg already in Source — skipped</span>'
         :'');
   } else {
     alertEl.className='alert alert-warn';
     alertEl.innerHTML='⚠ No actionable rows found. Check Action column contains "Negative Exact", "Negative Phrase", or "Pause".';
   }
   alertEl.classList.remove('hidden');
+
+  // ── Warnings table for not-in-source rows ─────────────────────────────
+  var warnBlock = document.getElementById('warnings-block');
+  var warnTbl   = document.getElementById('warnings-tbl');
+  if(notInSourceWarnings.length > 0){
+    warnBlock.style.display='block';
+    var wHdr = ['Tab','Campaign','Ad Group','Term / ASIN','Action'];
+    var wRows = notInSourceWarnings.map(function(w){
+      return [w.tab, w.camp||'—', w.adg||'—', w.term||'—', w.action||'—'];
+    });
+    var wHtml = '<thead><tr>'+wHdr.map(function(h){
+      return '<th style="background:#2d1f1f;color:#f87171;padding:6px 10px;white-space:nowrap">'+esc(h)+'</th>';
+    }).join('')+'</tr></thead><tbody>'+
+    wRows.map(function(r){
+      return '<tr>'+r.map(function(c){
+        return '<td style="padding:5px 10px;border-bottom:1px solid #2d2d2d;color:#e2e8f0;word-break:break-all">'+esc(c)+'</td>';
+      }).join('')+'</tr>';
+    }).join('')+'</tbody>';
+    warnTbl.innerHTML = wHtml;
+  } else {
+    warnBlock.style.display='none';
+  }
 
   var dlGrid=document.getElementById('dl-grid');
   dlGrid.innerHTML='';
