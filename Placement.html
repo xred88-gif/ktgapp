@@ -63,12 +63,9 @@ code{background:#0f1626;padding:2px 6px;border-radius:6px;border:1px solid rgba(
 
 
 <!-- Worker source — runs in its own memory heap -->
-<script id="workerSrc" type="text/plain">
+<script>
 /* ─────────────────────────────────────────────────────────────────────
-   Worker: streams the target sheet directly from the raw ZIP bytes.
-   Never loads the full uncompressed XML into memory.
-   Handles Amazon bulk files: inlineStr cells, 1 GB+ uncompressed XML,
-   bogus <dimension ref="A1"/> declarations, no XLSX.js dependency.
+   ZIP / XLSX utility functions — run on the main thread.
    ───────────────────────────────────────────────────────────────────── */
 
 /* col letters → 0-based index */
@@ -172,18 +169,117 @@ function parseSharedStrings(xml) {
   return result;
 }
 
-/* ── Stream-parse sheet XML from compressed bytes, posting chunks as rows come in ── */
-async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_SIZE) {
+
+</script>
+
+<script>
+/* ================================================================
+   Main-thread parser — replaces the Web Worker approach.
+   Blob-URL workers are blocked in sandboxed iframes, so we run
+   the same ZIP/XML streaming logic directly on the main thread.
+   ================================================================ */
+
+/* parseInWorker — same signature as before, now runs inline */
+async function parseInWorker(file, sheetCands, onChunk) {
+  const buf = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Cannot read file: ' + file.name));
+    reader.onload = (ev) => { resolve(ev.target.result); };
+    reader.readAsArrayBuffer(file);
+  });
+
+  const u8 = new Uint8Array(buf);
+  const CHUNK_SIZE = 1000;
+
+  /* Detect CSV */
+  const isZip = u8[0]===0x50 && u8[1]===0x4B && u8[2]===0x03 && u8[3]===0x04;
+  if (!isZip) {
+    const text = new TextDecoder('utf-8').decode(u8);
+    let first = true;
+    let chunk = [];
+    let pos = 0;
+    const len = text.length;
+    function parseLine() {
+      const row = []; let cur = ''; let inQ = false;
+      while (pos < len) {
+        const ch = text[pos++];
+        if (ch==='"') { if (inQ&&text[pos]==='"'){cur+='"';pos++;}else inQ=!inQ; }
+        else if (ch===','&&!inQ){row.push(cur===''?null:cur);cur='';}
+        else if ((ch==='\n'||ch==='\r')&&!inQ){if(ch==='\r'&&text[pos]==='\n')pos++;row.push(cur===''?null:cur);return row;}
+        else cur+=ch;
+      }
+      if(cur!==''||row.length)row.push(cur===''?null:cur);
+      return row.length?row:null;
+    }
+    while (pos < len) {
+      const row = parseLine(); if(!row)break;
+      if(row.length===1&&row[0]===null)continue;
+      chunk.push(row);
+      if(chunk.length>=CHUNK_SIZE){onChunk(chunk,'Sheet1',first);first=false;chunk=[];await tick();}
+    }
+    if(chunk.length)onChunk(chunk,'Sheet1',first);
+    return;
+  }
+
+  /* ZIP path */
+  const entries = parseCentralDir(u8);
+
+  const wbEntry = entries['xl/workbook.xml'];
+  if (!wbEntry) throw new Error('xl/workbook.xml not found');
+  const wbXml = await decompressToString(wbEntry, u8);
+
+  const sheetMap = {};
+  for (const m of wbXml.matchAll(/<sheet\s[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*\/?>/g))
+    sheetMap[m[1]] = m[2];
+  const sheetNames = Object.keys(sheetMap);
+  if (!sheetNames.length) throw new Error('No sheets found in workbook');
+
+  let sn = sheetNames[0];
+  outer: for (const n of sheetNames)
+    for (const c of sheetCands)
+      if (n.toLowerCase()===c.toLowerCase()){sn=n;break outer;}
+  if (sn===sheetNames[0]) {
+    outer2: for (const n of sheetNames)
+      for (const c of sheetCands)
+        if (n.toLowerCase().includes(c.toLowerCase())||c.toLowerCase().includes(n.toLowerCase())){sn=n;break outer2;}
+  }
+
+  const relsEntry = entries['xl/_rels/workbook.xml.rels'];
+  if (!relsEntry) throw new Error('workbook.xml.rels not found');
+  const relsXml = await decompressToString(relsEntry, u8);
+  const targetRId = sheetMap[sn];
+  const relMatch = relsXml.match(new RegExp(`Id="${targetRId}"[^>]*Target="([^"]+)"`));
+  if (!relMatch) throw new Error('Cannot find sheet file for: ' + sn);
+  let sheetPath = relMatch[1].replace(/^\//,'');
+  if (!sheetPath.startsWith('xl/')) sheetPath = 'xl/' + sheetPath;
+
+  let sharedStrings = [];
+  const ssEntry = entries['xl/sharedStrings.xml'];
+  if (ssEntry && ssEntry.compSize > 0) {
+    const ssXml = await decompressToString(ssEntry, u8);
+    sharedStrings = parseSharedStrings(ssXml);
+  }
+
+  const sheetEntry = entries[sheetPath];
+  if (!sheetEntry) throw new Error('Sheet file not found: ' + sheetPath);
+
+  /* Stream-parse, calling onChunk for each batch */
+  let first = true;
+  await streamParseSheet_main(sheetEntry, u8, sharedStrings, sn, CHUNK_SIZE, (chunk, sheetName) => {
+    onChunk(chunk, sheetName, first);
+    first = false;
+  });
+}
+
+/* Variant of streamParseSheet that calls a callback instead of postMessage */
+async function streamParseSheet_main(entry, u8, sharedStrings, sheetName, CHUNK_SIZE, onChunk) {
   const compData = getEntryData(u8, entry);
 
-  let ds, rawReader;
+  let rawReader;
   if (entry.compression === 0) {
-    // stored (uncompressed) — wrap in a readable stream
-    rawReader = new ReadableStream({
-      start(ctrl) { ctrl.enqueue(compData); ctrl.close(); }
-    }).getReader();
+    rawReader = new ReadableStream({start(ctrl){ctrl.enqueue(compData);ctrl.close();}}).getReader();
   } else {
-    ds = new DecompressionStream('deflate-raw');
+    const ds = new DecompressionStream('deflate-raw');
     const writer = ds.writable.getWriter();
     writer.write(compData);
     writer.close();
@@ -192,324 +288,97 @@ async function streamParseSheet(entry, u8, sharedStrings, id, sheetName, CHUNK_S
 
   const dec = new TextDecoder('utf-8');
   let xmlBuf = '';
-  let first = true;
   let chunk = [];
   let maxCol = 0;
+  let inSheetData=false,inRow=false,inCell=false,inV=false,inIs=false,inT=false;
+  let cellType='',cellAddr=null,cellVal=null,rowCells=null;
 
-  /* XML parse state */
-  let inSheetData = false;
-  let inRow = false;
-  let inCell = false;
-  let inV = false;
-  let inIs = false;
-  let inT = false;
-  let cellType = '';
-  let cellAddr = null;
-  let cellVal = null;
-  let rowCells = null;
-
-  function emitRow() {
-    if (!rowCells) return;
-    const cols = Object.keys(rowCells);
-    if (cols.length) {
-      const mx = Math.max(...cols.map(Number));
-      if (mx > maxCol) maxCol = mx;
-    }
-    const row = new Array(maxCol + 1).fill(null);
-    for (const ci of cols) row[+ci] = rowCells[ci];
-    chunk.push(row);
-    rowCells = null;
+  function emitRow(){
+    if(!rowCells)return;
+    const cols=Object.keys(rowCells);
+    if(cols.length){const mx=Math.max(...cols.map(Number));if(mx>maxCol)maxCol=mx;}
+    const row=new Array(maxCol+1).fill(null);
+    for(const ci of cols)row[+ci]=rowCells[ci];
+    chunk.push(row);rowCells=null;
   }
-
-  function flushChunk() {
-    if (!chunk.length) return;
-    const cl = maxCol + 1;
-    for (const r of chunk) { while (r.length < cl) r.push(null); }
-    self.postMessage({id, chunk, partial: true, first, sheetName});
-    first = false;
-    chunk = [];
+  function flushChunk(){
+    if(!chunk.length)return;
+    const cl=maxCol+1;
+    for(const r of chunk){while(r.length<cl)r.push(null);}
+    onChunk([...chunk],sheetName);
+    chunk=[];
   }
-
-  function processBuffer() {
-    while (true) {
-      const lt = xmlBuf.indexOf('<');
-
-      if (lt < 0) {
-        /* No '<' left in buffer — if we're inside a value tag, the entire
-           remaining buffer is partial text; accumulate it and keep it so
-           the next read() call can append more data and complete the value.
-           Do NOT clear xmlBuf here — that would drop the partial text. */
-        if ((inV || inT) && xmlBuf.length > 0) {
-          const text = ent(xmlBuf);
-          /* always accumulate as string; inV is finalized at </v> */
-          cellVal = (cellVal == null ? '' : cellVal) + text;
-          xmlBuf = '';
-        } else {
-          xmlBuf = '';
-        }
+  function processBuffer(){
+    while(true){
+      const lt=xmlBuf.indexOf('<');
+      if(lt<0){
+        if((inV||inT)&&xmlBuf.length>0){cellVal=(cellVal==null?'':cellVal)+ent(xmlBuf);xmlBuf='';}
+        else xmlBuf='';
         break;
       }
-
-      /* capture text content before next tag */
-      if (lt > 0 && (inV || inT)) {
-        const text = ent(xmlBuf.slice(0, lt));
-        if (inV) {
-          /* always accumulate as string — we parse the number at </v> */
-          cellVal = (cellVal == null ? '' : cellVal) + text;
-        } else if (inT) {
-          cellVal = (cellVal == null ? '' : cellVal) + text;
-        }
+      if(lt>0&&(inV||inT)){
+        const text=ent(xmlBuf.slice(0,lt));
+        if(inV)cellVal=(cellVal==null?'':cellVal)+text;
+        else if(inT)cellVal=(cellVal==null?'':cellVal)+text;
       }
-      if (lt > 0) xmlBuf = xmlBuf.slice(lt);
-
-      const gt = xmlBuf.indexOf('>');
-      if (gt < 0) break; /* incomplete tag — wait for more data */
-
-      const raw     = xmlBuf.slice(1, gt);
-      xmlBuf        = xmlBuf.slice(gt + 1);
-      const isClose = raw[0] === '/';
-      const isSelf  = raw[raw.length - 1] === '/';
-      const body    = isClose ? raw.slice(1) : raw;
-      const tagName = body.replace(/[\s\/][\s\S]*/, '');
-
-      if (!isClose && !isSelf) {
-        if (!inSheetData) {
-          if (tagName === 'sheetData') inSheetData = true;
-        } else {
-          if (tagName === 'row') {
-            rowCells = {}; inRow = true;
-          } else if (tagName === 'c' && inRow) {
-            const am = /\br="([A-Z]+\d+)"/.exec(raw);
-            const tm = /\bt="([^"]*)"/.exec(raw);
-            cellAddr  = am ? decodeAddr(am[1]) : null;
-            cellType  = tm ? tm[1] : '';
-            cellVal   = null;
-            inCell    = true; inV = false; inIs = false; inT = false;
-          } else if (tagName === 'v'  && inCell) { inV  = true; cellVal = null; }
-          else if (tagName === 'is' && inCell) { inIs = true; }
-          else if (tagName === 't'  && inIs)   { inT  = true; cellVal = null; }
-        }
-      } else {
-        if (tagName === 'sheetData' || tagName === 'worksheet') {
-          emitRow(); flushChunk(); return;
-        } else if (tagName === 'row') {
-          emitRow();
-          if (chunk.length >= CHUNK_SIZE) flushChunk();
-          inRow = false;
-        } else if (tagName === 'c') {
-          if (inCell && cellAddr && rowCells !== null) rowCells[cellAddr.c] = cellVal;
-          inCell = false; cellVal = null; cellType = ''; cellAddr = null;
-          inV = false; inIs = false; inT = false;
-        } else if (tagName === 'v') {
-          /* finalize: parse number/sharedString from accumulated string */
-          if (inV && cellVal != null) {
-            const sv = String(cellVal);
-            if (cellType === 's') {
-              const si = parseInt(sv, 10);
-              cellVal = (si >= 0 && si < sharedStrings.length) ? sharedStrings[si] : sv;
-            } else {
-              const n = parseFloat(sv);
-              cellVal = isNaN(n) ? sv : n;
-            }
+      if(lt>0)xmlBuf=xmlBuf.slice(lt);
+      const gt=xmlBuf.indexOf('>');
+      if(gt<0)break;
+      const raw=xmlBuf.slice(1,gt);
+      xmlBuf=xmlBuf.slice(gt+1);
+      const isClose=raw[0]==='/';
+      const isSelf=raw[raw.length-1]==='/';
+      const body=isClose?raw.slice(1):raw;
+      const tagName=body.replace(/[\s\/][\s\S]*/,'');
+      if(!isClose&&!isSelf){
+        if(!inSheetData){if(tagName==='sheetData')inSheetData=true;}
+        else{
+          if(tagName==='row'){rowCells={};inRow=true;}
+          else if(tagName==='c'&&inRow){
+            const am=/\br="([A-Z]+\d+)"/.exec(raw);const tm=/\bt="([^"]*)"/.exec(raw);
+            cellAddr=am?decodeAddr(am[1]):null;cellType=tm?tm[1]:'';cellVal=null;
+            inCell=true;inV=false;inIs=false;inT=false;
           }
-          inV = false;
+          else if(tagName==='v'&&inCell){inV=true;cellVal=null;}
+          else if(tagName==='is'&&inCell){inIs=true;}
+          else if(tagName==='t'&&inIs){inT=true;cellVal=null;}
         }
-        else if (tagName === 't')  { inT  = false; }
-        else if (tagName === 'is') { inIs = false; }
-      }
-    }
-  }
-
-  while (true) {
-    const {done, value} = await rawReader.read();
-    if (done) break;
-    xmlBuf += dec.decode(value, {stream: true});
-    processBuffer();
-  }
-  if (xmlBuf) processBuffer();
-  flushChunk();
-}
-
-/* ── Parse CSV text → aoa, posted in chunks ── */
-function parseCSV(text, id, CHUNK_SIZE) {
-  let first = true;
-  let chunk = [];
-  let pos = 0;
-  const len = text.length;
-
-  function parseLine() {
-    const row = [];
-    let cur = '';
-    let inQ = false;
-    while (pos < len) {
-      const ch = text[pos++];
-      if (ch === '"') {
-        if (inQ && text[pos] === '"') { cur += '"'; pos++; }
-        else inQ = !inQ;
-      } else if (ch === ',' && !inQ) {
-        row.push(cur === '' ? null : cur);
-        cur = '';
-      } else if ((ch === '\n' || ch === '\r') && !inQ) {
-        if (ch === '\r' && text[pos] === '\n') pos++;
-        row.push(cur === '' ? null : cur);
-        return row;
       } else {
-        cur += ch;
+        if(tagName==='sheetData'||tagName==='worksheet'){emitRow();flushChunk();return;}
+        else if(tagName==='row'){
+          emitRow();
+          if(chunk.length>=CHUNK_SIZE){flushChunk();}
+          inRow=false;
+        }
+        else if(tagName==='c'){
+          if(inCell&&cellAddr&&rowCells!==null)rowCells[cellAddr.c]=cellVal;
+          inCell=false;cellVal=null;cellType='';cellAddr=null;inV=false;inIs=false;inT=false;
+        }
+        else if(tagName==='v'){
+          if(inV&&cellVal!=null){
+            const sv=String(cellVal);
+            if(cellType==='s'){const si=parseInt(sv,10);cellVal=(si>=0&&si<sharedStrings.length)?sharedStrings[si]:sv;}
+            else{const n=parseFloat(sv);cellVal=isNaN(n)?sv:n;}
+          }
+          inV=false;
+        }
+        else if(tagName==='t'){inT=false;}
+        else if(tagName==='is'){inIs=false;}
       }
     }
-    if (cur !== '' || row.length) row.push(cur === '' ? null : cur);
-    return row.length ? row : null;
   }
 
-  while (pos < len) {
-    const row = parseLine();
-    if (!row) break;
-    if (row.length === 1 && row[0] === null) continue; // skip blank lines
-    chunk.push(row);
-    if (chunk.length >= CHUNK_SIZE) {
-      self.postMessage({id, chunk, partial: true, first, sheetName: 'Sheet1'});
-      first = false;
-      chunk = [];
-    }
+  let rowsSinceYield = 0;
+  while(true){
+    const {done,value}=await rawReader.read();
+    if(done)break;
+    xmlBuf+=dec.decode(value,{stream:true});
+    processBuffer();
+    rowsSinceYield += chunk.length;
+    if(rowsSinceYield >= CHUNK_SIZE){ await tick(); rowsSinceYield=0; }
   }
-  if (chunk.length) {
-    self.postMessage({id, chunk, partial: true, first, sheetName: 'Sheet1'});
-  }
-}
-
-/* ── Main message handler ── */
-self.onmessage = async function(e) {
-  const {id, buf, sheetCands} = e.data;
-  try {
-    const u8 = new Uint8Array(buf);
-
-    /* ── Detect CSV: ZIP starts with PK\x03\x04, CSV does not ── */
-    const isZip = u8[0] === 0x50 && u8[1] === 0x4B && u8[2] === 0x03 && u8[3] === 0x04;
-    if (!isZip) {
-      const text = new TextDecoder('utf-8').decode(u8);
-      parseCSV(text, id, 1000);
-      self.postMessage({id, done: true});
-      return;
-    }
-
-    const entries = parseCentralDir(u8);
-
-    /* Read workbook.xml → sheet names + rId */
-    const wbEntry = entries['xl/workbook.xml'];
-    if (!wbEntry) throw new Error('xl/workbook.xml not found');
-    const wbXml = await decompressToString(wbEntry, u8);
-
-    const sheetMap = {}; /* name → rId */
-    for (const m of wbXml.matchAll(/<sheet\s[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*\/?>/g)) {
-      sheetMap[m[1]] = m[2];
-    }
-    const sheetNames = Object.keys(sheetMap);
-    if (!sheetNames.length) throw new Error('No sheets found in workbook');
-
-    /* Pick best sheet — exact match first, then substring fallback */
-    let sn = sheetNames[0];
-    outer: for (const n of sheetNames)
-      for (const c of sheetCands)
-        if (n.toLowerCase() === c.toLowerCase()) { sn = n; break outer; }
-    if (sn === sheetNames[0]) {
-      outer2: for (const n of sheetNames)
-        for (const c of sheetCands)
-          if (n.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(n.toLowerCase())) { sn = n; break outer2; }
-    }
-
-    /* rId → sheet file path via workbook.xml.rels */
-    const relsEntry = entries['xl/_rels/workbook.xml.rels'];
-    if (!relsEntry) throw new Error('workbook.xml.rels not found');
-    const relsXml = await decompressToString(relsEntry, u8);
-    const targetRId = sheetMap[sn];
-    const relMatch  = relsXml.match(new RegExp(`Id="${targetRId}"[^>]*Target="([^"]+)"`));
-    if (!relMatch) throw new Error('Cannot find sheet file for: ' + sn);
-    let sheetPath = relMatch[1].replace(/^\//, '');
-    if (!sheetPath.startsWith('xl/')) sheetPath = 'xl/' + sheetPath;
-
-    /* Read sharedStrings (usually tiny, may be empty for inlineStr files) */
-    let sharedStrings = [];
-    const ssEntry = entries['xl/sharedStrings.xml'];
-    if (ssEntry && ssEntry.compSize > 0) {
-      const ssXml = await decompressToString(ssEntry, u8);
-      sharedStrings = parseSharedStrings(ssXml);
-    }
-
-    /* Stream-parse the sheet XML directly from ZIP compressed bytes */
-    const sheetEntry = entries[sheetPath];
-    if (!sheetEntry) throw new Error('Sheet file not found: ' + sheetPath);
-    await streamParseSheet(sheetEntry, u8, sharedStrings, id, sn, 1000);
-
-    self.postMessage({id, done: true});
-  } catch(err) {
-    self.postMessage({id, err: err.message || String(err)});
-  }
-};
-</script>
-
-
-<script>
-/* ================================================================
-   Build an inline Web Worker from the script tag above.
-   The worker runs in its own V8 isolate / heap, so it gets its
-   own memory budget separate from the main page — this is the
-   correct fix for "ArrayBuffer allocation failed" on large files.
-   ================================================================ */
-let _worker = null;
-let _workerReady = false;
-let _pendingWorker = [];
-let _workerCallbacks = new Map();
-let _workerIdSeq = 0;
-
-function getWorker() {
-  if (_worker) return _worker;
-  const src = document.getElementById('workerSrc').textContent;
-  const blob = new Blob([src], {type: 'application/javascript'});
-  const url = URL.createObjectURL(blob);
-  _worker = new Worker(url);
-  _worker.onmessage = function(e) {
-    const {id, chunk, partial, first, sheetName, done, err} = e.data;
-    const cb = _workerCallbacks.get(id);
-    if (!cb) return;
-    if (err) {
-      _workerCallbacks.delete(id);
-      cb.onErr(err);
-    } else if (partial) {
-      cb.onChunk(chunk, sheetName, first);
-    } else if (done) {
-      _workerCallbacks.delete(id);
-      cb.onDone();
-    }
-  };
-  _worker.onerror = function(e) {
-    // If the worker crashes entirely, reject all pending
-    _workerCallbacks.forEach((cb) => cb.onErr('Worker crashed: ' + e.message));
-    _workerCallbacks.clear();
-    _worker = null; // will be recreated on next call
-  };
-  return _worker;
-}
-
-/* Send file to worker for parsing. Calls onChunk(chunk, sheetName) per chunk. Returns Promise<void> */
-function parseInWorker(file, sheetCands, onChunk) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Cannot read file: ' + file.name));
-    reader.onload = function(ev) {
-      const buf = ev.target.result;
-      reader.onload = null; // allow GC
-      const id = ++_workerIdSeq;
-      const w = getWorker();
-      _workerCallbacks.set(id, {
-        onChunk: (chunk, sheetName, first) => { onChunk(chunk, sheetName, first); },
-        onDone: () => { resolve(); },
-        onErr: (err) => { reject(new Error(err)); }
-      });
-      // Transfer the ArrayBuffer to the worker (zero-copy, main thread loses ref)
-      w.postMessage({id, buf, sheetCands}, [buf]);
-    };
-    reader.readAsArrayBuffer(file);
-  });
+  if(xmlBuf)processBuffer();
+  flushChunk();
 }
 
 /* ---- Helpers ---- */
@@ -526,6 +395,17 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
 function fc(hdr,names){
   if(!hdr)return -1;
   for(const n of names){const ln=n.toLowerCase().trim();for(let i=0;i<hdr.length;i++){if(String(hdr[i]||'').toLowerCase().trim()===ln)return i}}
+  return -1;
+}
+/* Fuzzy finder for Top-of-search IS — handles any capitalisation / punctuation variant */
+function fcTos(hdr){
+  if(!hdr)return -1;
+  for(let i=0;i<hdr.length;i++){
+    const v=String(hdr[i]||'').toLowerCase().replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();
+    if(v.includes('top') && (v.includes('search') || v.includes('srch')) &&
+       (v.includes('impression') || v.includes('impr') || v.includes('is') || v.includes('share')))
+      return i;
+  }
   return -1;
 }
 function gv(r,i){return(i>=0&&r&&i<r.length)?r[i]:''}
@@ -717,7 +597,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
         const h=aoa[0];
         const C={cn:fc(h,['Campaigns','Campaign Name','Campaign']),
                  sp:fc(h,['Spend','Spend (USD)','Total Spend','Total Cost']),
-                 tos:fc(h,['Top-of-search impression share','Top of search impression share'])};
+                 tos:fcTos(h)};
         for(let i=1;i<aoa.length;i++){
           const r=aoa[i];if(!r)continue;
           yd.push([String(gv(r,C.cn)||''),num(gv(r,C.sp))]);
@@ -739,7 +619,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
         if(!aoa||aoa.length<2)continue;
         const h=aoa[0];
         const C={cn:fc(h,['Campaigns','Campaign Name','Campaign']),
-                 tos:fc(h,['Top-of-search impression share','Top of search impression share'])};
+                 tos:fcTos(h)};
         for(let i=1;i<aoa.length;i++){
           const r=aoa[i];if(!r)continue;
           tos30.push([String(gv(r,C.cn)||''),gv(r,C.tos)||0]);
@@ -760,7 +640,7 @@ document.getElementById('proceed').addEventListener('click',async function(){
         if(!aoa||aoa.length<2)continue;
         const h=aoa[0];
         const C={cn:fc(h,['Campaigns','Campaign Name','Campaign']),
-                 tos:fc(h,['Top-of-search impression share','Top of search impression share'])};
+                 tos:fcTos(h)};
         for(let i=1;i<aoa.length;i++){
           const r=aoa[i];if(!r)continue;
           tos7.push([String(gv(r,C.cn)||''),gv(r,C.tos)||0]);
