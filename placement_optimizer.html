@@ -537,20 +537,23 @@ function runProcess(){
           var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
           var plc=normPlacement(rawPlacement);
           if(placementLookup[cam]&&placementLookup[cam][plc]!==undefined){
-            var nr=Object.assign({},row);
-            nr['Entity']='Bidding adjustment';
-            nr['State']=String(nr['State']||'').trim().toLowerCase()||nr['State'];
-            nr['Campaign state (Informational only)']=String(nr['Campaign state (Informational only)']||'').trim().toLowerCase()||nr['Campaign state (Informational only)'];
-            nr['Percentage']=placementLookup[cam][plc];
-            nr['Operation']='Update';
-            updated++;
-            placementOutRows.push(nr);
+            var newPct=placementLookup[cam][plc];
+            var oldPct=parseFloat(row['Percentage']);
+            var hasChange = isNaN(oldPct) ? true : (Math.round(newPct*100)/100 !== Math.round(oldPct*100)/100);
+            if(hasChange){
+              var nr=Object.assign({},row);
+              nr['Entity']='Bidding adjustment';
+              nr['State']=String(nr['State']||'').trim().toLowerCase()||nr['State'];
+              nr['Campaign state (Informational only)']=String(nr['Campaign state (Informational only)']||'').trim().toLowerCase()||nr['Campaign state (Informational only)'];
+              nr['Percentage']=newPct;
+              nr['Operation']='Update';
+              updated++;
+              placementOutRows.push(nr);
+            } else {
+              skipped++;
+            }
           } else {
             skipped++;
-            var copy=Object.assign({},row);
-            copy['Entity']='Bidding adjustment';
-            copy['Operation']='Update';
-            placementOutRows.push(copy);
           }
         }
       });
