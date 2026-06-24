@@ -522,9 +522,10 @@ document.getElementById('proceed').addEventListener('click',async function(){
           const r=aoa[i];if(!r)continue;
           const pl=gv(r,C.pl);if(!pl||String(pl).trim()==='')continue;
           const st=gv(r,C.st);if(st&&String(st).toLowerCase().includes('paused'))continue;
+          const pcRaw=gv(r,C.pc);if(pcRaw===null||pcRaw===undefined||String(pcRaw).trim()==='')continue;
           usa.push([String(gv(r,C.cn)||''),num(gv(r,C.cl)),num(gv(r,C.sp)),
                     num(gv(r,C.or)),acosDec(gv(r,C.ac)),String(pl).trim(),
-                    num(gv(r,C.pc)),'']);
+                    num(pcRaw),'']);
           aoa[i]=null;
         }
         aoa.length=0;
@@ -545,11 +546,13 @@ document.getElementById('proceed').addEventListener('click',async function(){
         const C={cn:fc(h,['Campaign Name (Informational only)','Campaign Name','Campaigns']),
                  st:fc(h,['Campaign State (Informational only)','Campaign State']),
                  cl:fc(h,['Clicks']),sp:fc(h,['Spend','Spend (USD)','Total Spend']),
-                 or:fc(h,['Orders']),ac:fc(h,['ACOS','ACoS']),pl:fc(h,['Placement'])};
+                 or:fc(h,['Orders']),ac:fc(h,['ACOS','ACoS']),pl:fc(h,['Placement']),
+                 pc:fc(h,['Percentage','%'])};
         for(let i=1;i<aoa.length;i++){
           const r=aoa[i];if(!r)continue;
           const pl=gv(r,C.pl);if(!pl||String(pl).trim()==='')continue;
           const st=gv(r,C.st);if(st&&String(st).toLowerCase().includes('paused'))continue;
+          const pcRaw=gv(r,C.pc);if(pcRaw===null||pcRaw===undefined||String(pcRaw).trim()==='')continue;
           const cn=String(gv(r,C.cn)||''),pls=String(pl).trim();
           const clicks=num(gv(r,C.cl)),spend=num(gv(r,C.sp)),orders=num(gv(r,C.or)),acos=acosDec(gv(r,C.ac));
           b7.push([cn,pls,clicks,spend,orders,acos]);
