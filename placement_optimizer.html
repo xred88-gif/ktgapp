@@ -370,7 +370,10 @@ function loadFile(file,type){
   reader.onload=function(e){
     try{
       var data=new Uint8Array(e.target.result);
-      var wb=XLSX.read(data,{type:'array'});
+      // Large Amazon bulk files can contain hundreds of thousands of rows.
+      // Dense mode stores worksheet cells in row arrays instead of a huge A1-address object,
+      // substantially reducing browser memory usage while preserving workbook content.
+      var wb=XLSX.read(data,{type:'array', dense:(type==='bulk')});
       if(type==='template') templateWB=wb; else bulkWB=wb;
       markLoaded(type,file.name);
       checkReady();
@@ -407,8 +410,15 @@ function normPlacement(raw){
 }
 
 function cellVal(sheet,r,c){
-  var addr=XLSX.utils.encode_cell({r:r,c:c});
-  var cell=sheet[addr];
+  // Support both normal SheetJS worksheets (A1-addressed objects) and dense worksheets
+  // (row arrays). Dense mode is used for large Amazon bulk files to avoid memory exhaustion.
+  var cell;
+  if(Array.isArray(sheet)){
+    cell=(sheet[r]&&sheet[r][c])?sheet[r][c]:null;
+  }else{
+    var addr=XLSX.utils.encode_cell({r:r,c:c});
+    cell=sheet[addr];
+  }
   if(!cell) return '';
   return String(cell.v===undefined||cell.v===null?'':cell.v).trim();
 }
@@ -471,12 +481,21 @@ function parseBulk(wb){
     return n.toLowerCase().indexOf('sponsored products campaigns')!==-1;
   })||wb.SheetNames[0];
   var sheet=wb.Sheets[sName];
-  var raw=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
-  if(!raw||!raw.length) return {headers:[],rows:[]};
-  var hIdx=0;
-  for(var i=0;i<Math.min(10,raw.length);i++){
-    if(raw[i].some(function(c){var v=String(c).trim().toLowerCase();return v==='entity'||v==='product';})){hIdx=i;break;}
+  if(!sheet || !sheet['!ref']) return {headers:[],sheet:null,startRow:0,endRow:-1,colIndex:{}};
+
+  var range=XLSX.utils.decode_range(sheet['!ref']);
+  var hIdx=range.s.r;
+
+  // Find the real header row without materializing the whole worksheet.
+  for(var r=range.s.r;r<=Math.min(range.s.r+9,range.e.r);r++){
+    var foundHeader=false;
+    for(var c=range.s.c;c<=range.e.c;c++){
+      var v=cellVal(sheet,r,c).toLowerCase();
+      if(v==='entity'||v==='product'){ foundHeader=true; break; }
+    }
+    if(foundHeader){ hIdx=r; break; }
   }
+
   // Normalize headers to correct casing regardless of how they appear in the file
   var headerCaseMap={
     'entity':'Entity','operation':'Operation','bidding adjustment':'Bidding adjustment',
@@ -487,19 +506,37 @@ function parseBulk(wb){
     'placement product page':'Placement product page',
     'placement rest of search':'Placement rest of search'
   };
-  var headers=raw[hIdx].map(function(h){
-    var t=String(h).trim();
-    return headerCaseMap[t.toLowerCase()]||t;
-  });
-  var rows=[];
-  for(var j=hIdx+1;j<raw.length;j++){
-    var obj={};
-    headers.forEach(function(h,idx){obj[h]=raw[j][idx]!==undefined?raw[j][idx]:'';});
-    rows.push(obj);
+
+  var headers=[];
+  var colIndex={};
+  for(var c=range.s.c;c<=range.e.c;c++){
+    var t=cellVal(sheet,hIdx,c);
+    var h=headerCaseMap[t.toLowerCase()]||t;
+    headers.push(h);
+    if(h && colIndex[h]===undefined) colIndex[h]=c;
   }
-  return {headers:headers,rows:rows};
+
+  return {headers:headers,sheet:sheet,startRow:hIdx+1,endRow:range.e.r,colIndex:colIndex,headerStartCol:range.s.c,sheetName:sName};
 }
 
+function bulkField(bulk,r,names){
+  for(var i=0;i<names.length;i++){
+    var c=bulk.colIndex[names[i]];
+    if(c!==undefined) return cellVal(bulk.sheet,r,c);
+  }
+  return '';
+}
+
+function bulkRowObject(bulk,r){
+  var obj={};
+  for(var i=0;i<bulk.headers.length;i++){
+    var h=bulk.headers[i];
+    if(!h) continue;
+    var c=bulk.headerStartCol!==undefined ? bulk.headerStartCol+i : i;
+    obj[h]=cellVal(bulk.sheet,r,c);
+  }
+  return obj;
+}
 function runProcess(){
   hideError();
   document.getElementById('resultBox').style.display='none';
@@ -517,7 +554,10 @@ function runProcess(){
       }
 
       var bulk=parseBulk(bulkWB);
-      if(!bulk.rows.length) throw new Error('No data found in bulk file. Ensure the "Sponsored Products Campaigns" tab exists with data.');
+      if(!bulk.sheet || bulk.endRow<bulk.startRow){
+        var names=(bulkWB&&bulkWB.SheetNames)?bulkWB.SheetNames.join(', '):'none';
+        throw new Error('Bulk workbook loaded but the campaign sheet could not be parsed. Sheets found: '+names+'. For very large files, use this large-file build and reload the page before selecting the files.');
+      }
 
       // Create lookup for placements
       var placementLookup={};
@@ -526,111 +566,90 @@ function runProcess(){
         placementLookup[t.campaignName][t.placementType]=t.newValue;
       });
 
-      // Process Placement (Bidding Adjustment rows)
       var updated=0,skipped=0;
       var placementOutRows=[];
-      bulk.rows.forEach(function(row){
-        var entity=String(row['Entity']||'').trim().toLowerCase();
-        var product=String(row['Product']||'').trim().toLowerCase();
-        var rawPlacement=String(row['Placement']||'').trim();
-        if(product==='sponsored products'&&entity==='bidding adjustment'&&rawPlacement!==''){
-          var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
-          var plc=normPlacement(rawPlacement);
-          if(placementLookup[cam]&&placementLookup[cam][plc]!==undefined){
-            var newPct=placementLookup[cam][plc];
-            var oldPct=parseFloat(row['Percentage']);
-            var hasChange = isNaN(oldPct) ? true : (Math.round(newPct*100)/100 !== Math.round(oldPct*100)/100);
-            if(hasChange){
-              var nr=Object.assign({},row);
-              nr['Entity']='Bidding adjustment';
-              nr['State']=String(nr['State']||'').trim().toLowerCase()||nr['State'];
-              nr['Campaign state (Informational only)']=String(nr['Campaign state (Informational only)']||'').trim().toLowerCase()||nr['Campaign state (Informational only)'];
-              nr['Percentage']=newPct;
-              nr['Operation']='Update';
-              updated++;
-              placementOutRows.push(nr);
-            } else {
-              skipped++;
-            }
-          } else {
-            skipped++;
+      var budgetOutRows=[];
+      var bidsOutRows=[];
+      var bidsIncOutRows=[];
+
+      var hasBudget=Object.keys(tmpl.budgetCampaigns).length>0;
+      var hasDecrease=Object.keys(tmpl.decreaseBidsCampaigns).length>0;
+      var hasIncrease=Object.keys(tmpl.increaseBidsCampaigns).length>0;
+
+      // One memory-efficient pass through the large Amazon sheet.
+      for(var r=bulk.startRow;r<=bulk.endRow;r++){
+        var product=bulkField(bulk,r,['Product']).toLowerCase();
+        if(product!=='sponsored products') continue;
+
+        var entity=bulkField(bulk,r,['Entity']).toLowerCase();
+        var cam='';
+
+        if(entity==='bidding adjustment'){
+          var rawPlacement=bulkField(bulk,r,['Placement']);
+          if(rawPlacement!==''){
+            cam=normCampaignName(bulkField(bulk,r,['Campaign name (Informational only)','Campaign Name (Informational only)','Campaign Name','Campaign name']));
+            var plc=normPlacement(rawPlacement);
+            if(placementLookup[cam]&&placementLookup[cam][plc]!==undefined){
+              var newPct=placementLookup[cam][plc];
+              var oldPct=parseFloat(bulkField(bulk,r,['Percentage']));
+              var hasChange=isNaN(oldPct)?true:(Math.round(newPct*100)/100!==Math.round(oldPct*100)/100);
+              if(hasChange){
+                var nr=bulkRowObject(bulk,r);
+                nr['Entity']='Bidding adjustment';
+                nr['State']=String(nr['State']||'').trim().toLowerCase()||nr['State'];
+                nr['Campaign state (Informational only)']=String(nr['Campaign state (Informational only)']||'').trim().toLowerCase()||nr['Campaign state (Informational only)'];
+                nr['Percentage']=newPct;
+                nr['Operation']='Update';
+                updated++;
+                placementOutRows.push(nr);
+              }else skipped++;
+            }else skipped++;
+          }
+          continue;
+        }
+
+        if(entity==='campaign' && hasBudget){
+          cam=normCampaignName(bulkField(bulk,r,['Campaign name (Informational only)','Campaign Name (Informational only)','Campaign Name','Campaign name']));
+          if(tmpl.budgetCampaigns[cam]!==undefined){
+            var br=bulkRowObject(bulk,r);
+            br['Daily Budget']=tmpl.budgetCampaigns[cam];
+            br['Operation']='Update';
+            budgetOutRows.push(br);
+          }
+          continue;
+        }
+
+        if((entity==='keyword'||entity==='product targeting') && (hasDecrease||hasIncrease)){
+          cam=normCampaignName(bulkField(bulk,r,['Campaign name (Informational only)','Campaign Name (Informational only)','Campaign Name','Campaign name']));
+          var currentBid=parseFloat(bulkField(bulk,r,['Bid']));
+          if(isNaN(currentBid)||currentBid<=0) continue;
+
+          if(hasDecrease && tmpl.decreaseBidsCampaigns[cam]!==undefined){
+            var decreasePercent=tmpl.decreaseBidsCampaigns[cam];
+            var newBid=currentBid*(1-decreasePercent/100);
+            newBid=Math.round(newBid*100)/100;
+            if(newBid<0.02) newBid=0.02;
+            var dr=bulkRowObject(bulk,r);
+            dr['Bid']=newBid;
+            dr['Operation']='Update';
+            bidsOutRows.push(dr);
+          }
+
+          if(hasIncrease && tmpl.increaseBidsCampaigns[cam]!==undefined){
+            var increasePercent=tmpl.increaseBidsCampaigns[cam];
+            var newBidInc=currentBid*(1+increasePercent/100);
+            newBidInc=Math.round(newBidInc*100)/100;
+            var ir=bulkRowObject(bulk,r);
+            ir['Bid']=newBidInc;
+            ir['Operation']='Update';
+            bidsIncOutRows.push(ir);
           }
         }
-      });
-
-      // Process Budget (Campaign rows)
-      var budgetOutRows=[];
-      var budgetCampaignNames = Object.keys(tmpl.budgetCampaigns);
-      if(budgetCampaignNames.length > 0){
-        bulk.rows.forEach(function(row){
-          var entity=String(row['Entity']||'').trim().toLowerCase();
-          var product=String(row['Product']||'').trim().toLowerCase();
-          if(product==='sponsored products' && entity==='campaign'){
-            var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
-            if(tmpl.budgetCampaigns[cam] !== undefined){
-              var nr=Object.assign({},row);
-              nr['Daily Budget'] = tmpl.budgetCampaigns[cam];
-              nr['Operation'] = 'Update';
-              budgetOutRows.push(nr);
-            }
-          }
-        });
-      }
-
-      // Process Decrease Bids (Keyword and Product Targeting rows)
-      var bidsOutRows=[];
-      var decreaseCampaignNames = Object.keys(tmpl.decreaseBidsCampaigns);
-      if(decreaseCampaignNames.length > 0){
-        bulk.rows.forEach(function(row){
-          var entity=String(row['Entity']||'').trim().toLowerCase();
-          var product=String(row['Product']||'').trim().toLowerCase();
-          if(product==='sponsored products' && (entity==='keyword' || entity==='product targeting')){
-            var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
-            if(tmpl.decreaseBidsCampaigns[cam] !== undefined){
-              var decreasePercent = tmpl.decreaseBidsCampaigns[cam];
-              var currentBid = parseFloat(row['Bid']);
-              if(!isNaN(currentBid) && currentBid > 0){
-                var newBid = currentBid * (1 - decreasePercent / 100);
-                newBid = Math.round(newBid * 100) / 100; // Round to 2 decimals
-                if(newBid < 0.02) newBid = 0.02; // Amazon minimum bid
-                var nr=Object.assign({},row);
-                nr['Bid'] = newBid;
-                nr['Operation'] = 'Update';
-                bidsOutRows.push(nr);
-              }
-            }
-          }
-        });
       }
 
       placementData={headers:bulk.headers,rows:placementOutRows,updated:updated,skipped:skipped,total:placementOutRows.length};
       budgetData={headers:bulk.headers,rows:budgetOutRows,count:budgetOutRows.length};
       bidsData={headers:bulk.headers,rows:bidsOutRows,count:bidsOutRows.length};
-
-      // Process Increase Bids (Keyword and Product Targeting rows)
-      var bidsIncOutRows=[];
-      var increaseCampaignNames = Object.keys(tmpl.increaseBidsCampaigns);
-      if(increaseCampaignNames.length > 0){
-        bulk.rows.forEach(function(row){
-          var entity=String(row['Entity']||'').trim().toLowerCase();
-          var product=String(row['Product']||'').trim().toLowerCase();
-          if(product==='sponsored products' && (entity==='keyword' || entity==='product targeting')){
-            var cam=normCampaignName(String(row['Campaign name (Informational only)']||row['Campaign Name (Informational only)']||row['Campaign Name']||row['Campaign name']||''));
-            if(tmpl.increaseBidsCampaigns[cam] !== undefined){
-              var increasePercent = tmpl.increaseBidsCampaigns[cam];
-              var currentBid = parseFloat(row['Bid']);
-              if(!isNaN(currentBid) && currentBid > 0){
-                var newBid = currentBid * (1 + increasePercent / 100);
-                newBid = Math.round(newBid * 100) / 100;
-                var nr=Object.assign({},row);
-                nr['Bid'] = newBid;
-                nr['Operation'] = 'Update';
-                bidsIncOutRows.push(nr);
-              }
-            }
-          }
-        });
-      }
       bidsIncData={headers:bulk.headers,rows:bidsIncOutRows,count:bidsIncOutRows.length};
 
       showResult();
@@ -641,7 +660,6 @@ function runProcess(){
       '<path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Process Files';
   },60);
 }
-
 function showResult(){
   document.getElementById('statUpdated').textContent=placementData.updated;
   document.getElementById('statSkipped').textContent=placementData.skipped;
