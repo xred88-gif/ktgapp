@@ -529,7 +529,7 @@ function handleBulkUpload(input) {
   reader.onload = function(e) {
     try {
       const data = new Uint8Array(e.target.result);
-      bulkWorkbook = XLSX.read(data, { type: 'array' });
+      bulkWorkbook = XLSX.read(data, { type: 'array', dense: true });
       const sheets = bulkWorkbook.SheetNames;
 
       document.getElementById('iconBulk').textContent = '✅';
@@ -726,6 +726,35 @@ function getBleederSettings() {
   };
 }
 
+// Large-file helpers: support SheetJS dense worksheets without materializing
+// hundreds of thousands of rows into a second giant JavaScript array.
+function getSheetRange(sheet) {
+  if (!sheet || !sheet['!ref']) return null;
+  try { return XLSX.utils.decode_range(sheet['!ref']); } catch (_) { return null; }
+}
+
+function getSheetCellValue(sheet, r, c) {
+  let cell;
+  // SheetJS dense mode stores rows as arrays of cell objects.
+  if (Array.isArray(sheet)) {
+    const denseRow = sheet[r];
+    cell = denseRow ? denseRow[c] : undefined;
+  } else {
+    cell = sheet[XLSX.utils.encode_cell({ r, c })];
+  }
+  if (!cell) return undefined;
+  return cell.v;
+}
+
+function readSheetRow(sheet, r, startCol, endCol) {
+  const row = new Array(endCol - startCol + 1);
+  for (let c = startCol; c <= endCol; c++) {
+    const v = getSheetCellValue(sheet, r, c);
+    if (v !== undefined && v !== null) row[c - startCol] = v;
+  }
+  return row;
+}
+
 function processFiles() {
   clearError();
   revokeLinks();
@@ -750,173 +779,152 @@ function processFiles() {
     if (!sheetName) continue;
 
     const sheet = bulkWorkbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-    if (data.length < 2) continue;
+    const range = getSheetRange(sheet);
+    if (!range || range.e.r <= range.s.r) continue;
 
-    const headers = data[0].map(h => String(h || ''));
+    const headers = readSheetRow(sheet, range.s.r, range.s.c, range.e.c).map(h => String(h || ''));
     const cols = getColMap(headers);
-    const dataRows = data.slice(1);
-    const eligible = dataRows.filter(row => isEligible(row, cols, cfg.key));
 
-    // Build campaign → template map
+    // Cache campaign -> matching template. This preserves the original fuzzy
+    // matching rules while avoiding a repeated template scan for every row.
     const campMap = new Map();
-    for (const row of eligible) {
-      const cn = getCampaignName(row, cols);
-      if (!cn || campMap.has(cn)) continue;
+    function templateForCampaign(cn) {
+      if (!cn) return null;
+      if (campMap.has(cn)) return campMap.get(cn);
+      let matched = null;
       for (const tmpl of templateRows) {
-        if (matchesCampaign(cn, tmpl.campaign)) { campMap.set(cn, tmpl); break; }
+        if (matchesCampaign(cn, tmpl.campaign)) { matched = tmpl; break; }
       }
+      campMap.set(cn, matched);
+      return matched;
     }
 
-    // Log for diagnostics
-    processingLog.push({
-      tab: cfg.key,
-      sheetFound: sheetName,
-      totalRows: dataRows.length,
-      eligibleRows: eligible.length,
-      matchedCampaigns: campMap.size,
-      campaigns: [...campMap.keys()].slice(0, 20),
-    });
-
+    let totalRows = 0;
+    let eligibleRows = 0;
+    const matchedCampaignNames = new Set();
     const bleeders = [], minacos = [], lowclicks = [], maxacos = [];
+    const campBudget = [], campPaused = [];
 
-    for (const row of eligible) {
+    // ONE streaming-style pass over the worksheet. Each row array exists only
+    // for the duration of this iteration unless it is actually needed in output.
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      totalRows++;
+      const row = readSheetRow(sheet, r, range.s.c, range.e.c);
       const cn = getCampaignName(row, cols);
-      const tmpl = campMap.get(cn);
-      if (!tmpl) continue;
+      if (!cn) continue;
+      const tmpl = templateForCampaign(cn);
+      if (tmpl) matchedCampaignNames.add(cn);
 
-      const clicks = parseNumVal(row[cols.clicks]);
-      const orders = parseNumVal(row[cols.orders]);
-      const acos   = parseAcos(row[cols.acos]);
-      const bid    = parseNumVal(row[cols.bid]);
-      const spend  = cols.spend >= 0 ? parseNumVal(row[cols.spend]) : 0;
+      // ── Keyword / target bid optimization ──
+      if (isEligible(row, cols, cfg.key)) {
+        eligibleRows++;
+        if (tmpl) {
+          const clicks = parseNumVal(row[cols.clicks]);
+          const orders = parseNumVal(row[cols.orders]);
+          const acos   = parseAcos(row[cols.acos]);
+          const bid    = parseNumVal(row[cols.bid]);
+          const spend  = cols.spend >= 0 ? parseNumVal(row[cols.spend]) : 0;
 
-      // ── BLEEDERS ──
-      if (tmpl.bleeders && orders === 0) {
-        const pauseByClicks = clicks > bs.highMin;
-        const pauseBySpend  = spend > 0 && spend >= bs.pauseMinSpend;
-        const shouldPause =
-          bs.pauseMode === 'clicks' ? pauseByClicks :
-          bs.pauseMode === 'spend'  ? pauseBySpend  :
-          pauseByClicks || pauseBySpend;
+          // ── BLEEDERS ──
+          if (tmpl.bleeders && orders === 0) {
+            const pauseByClicks = clicks > bs.highMin;
+            const pauseBySpend  = spend > 0 && spend >= bs.pauseMinSpend;
+            const shouldPause =
+              bs.pauseMode === 'clicks' ? pauseByClicks :
+              bs.pauseMode === 'spend'  ? pauseBySpend  :
+              pauseByClicks || pauseBySpend;
 
-        if (shouldPause) {
-          const nr = [...row]; nr[cols.state] = 'paused'; nr[cols.operation] = 'update';
-          bleeders.push(nr);
-        } else if (clicks >= bs.t1min && clicks <= bs.t1max) {
-          const nr = [...row]; nr[cols.bid] = round2(bid * (1 - bs.t1red / 100)); nr[cols.operation] = 'update';
-          bleeders.push(nr);
-        } else if (clicks >= bs.t2min && clicks <= bs.t2max) {
-          const nr = [...row]; nr[cols.bid] = round2(bid * (1 - bs.t2red / 100)); nr[cols.operation] = 'update';
-          bleeders.push(nr);
+            if (shouldPause) {
+              const nr = [...row]; nr[cols.state] = 'paused'; nr[cols.operation] = 'update';
+              bleeders.push(nr);
+            } else if (clicks >= bs.t1min && clicks <= bs.t1max) {
+              const nr = [...row]; nr[cols.bid] = round2(bid * (1 - bs.t1red / 100)); nr[cols.operation] = 'update';
+              bleeders.push(nr);
+            } else if (clicks >= bs.t2min && clicks <= bs.t2max) {
+              const nr = [...row]; nr[cols.bid] = round2(bid * (1 - bs.t2red / 100)); nr[cols.operation] = 'update';
+              bleeders.push(nr);
+            }
+          }
+
+          // ══ COL V: MINACOS ══
+          if (tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos) {
+            const reductionPct = Math.min(acos - tmpl.minAcos, 90);
+            const newBid = Math.max(0.02, round2(bid * (1 - reductionPct / 100)));
+            const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
+            minacos.push(nr);
+          }
+
+          // ══ COL W: LOW CLICKS BOOST ══
+          if (tmpl.lowClicks !== null && clicks <= 1) {
+            const newBid = round2(bid * (1 + tmpl.lowClicks / 100));
+            const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
+            lowclicks.push(nr);
+          }
+
+          // ══ COL Y + X: MAXACOS ══
+          const alreadyInMinAcos = tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos;
+          if (
+            tmpl.maxAcos !== null &&
+            tmpl.increase !== null &&
+            orders >= 1 &&
+            acos > 0 &&
+            acos < tmpl.maxAcos &&
+            !alreadyInMinAcos
+          ) {
+            const newBid = round2(bid * (1 + tmpl.increase / 100));
+            const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
+            maxacos.push(nr);
+          }
         }
       }
 
-      // ══ COL V: MINACOS ══
-      // Rule: Col V = min ACOS threshold.
-      // If keyword ACOS > V%, lower bid by exactly (ACOS - V)%.
-      // Example: V=70%, keyword ACOS=85% → reduce bid by 15%.
-      if (tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos) {
-        const reductionPct = Math.min(acos - tmpl.minAcos, 90); // capped at 90% reduction
-        const newBid = Math.max(0.02, round2(bid * (1 - reductionPct / 100)));
-        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
-        minacos.push(nr);
-      }
-
-      // ══ COL W: LOW CLICKS BOOST ══
-      // Rule: Col W = boost %.
-      // If keyword has 0 or 1 click → increase bid by W%.
-      // Applies regardless of ACOS or orders.
-      if (tmpl.lowClicks !== null && clicks <= 1) {
-        const newBid = round2(bid * (1 + tmpl.lowClicks / 100));
-        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
-        lowclicks.push(nr);
-      }
-
-      // ══ COL Y + X: MAXACOS ══
-      // Rule: Col Y = max ACOS threshold, Col X = increase %.
-      // If keyword ACOS < Y% AND keyword has ≥1 order → increase bid by X%.
-      // Example: Y=25%, keyword ACOS=24%, X=10% → increase bid by 10%.
-      // Excluded only if ACOS is already above col V threshold — that goes to MINACOS instead.
-      // No hard cap on ACOS — col Y is the only ceiling.
-      const alreadyInMinAcos = tmpl.minAcos !== null && acos > 0 && acos > tmpl.minAcos;
-      if (
-        tmpl.maxAcos !== null &&
-        tmpl.increase !== null &&
-        orders >= 1 &&
-        acos > 0 &&
-        acos < tmpl.maxAcos &&
-        !alreadyInMinAcos
-      ) {
-        const newBid = round2(bid * (1 + tmpl.increase / 100));
-        const nr = [...row]; nr[cols.bid] = newBid; nr[cols.operation] = 'update';
-        maxacos.push(nr);
-      }
-    }
-
-    if (bleeders.length)  results.push({ tabName: cfg.key, category: 'Bleeders',        headers, rows: bleeders,  count: bleeders.length });
-    if (minacos.length)   results.push({ tabName: cfg.key, category: 'MINACOS',          headers, rows: minacos,   count: minacos.length });
-    if (lowclicks.length) results.push({ tabName: cfg.key, category: 'Low Clicks Boost', headers, rows: lowclicks, count: lowclicks.length });
-    if (maxacos.length)   results.push({ tabName: cfg.key, category: 'MAXACOS',          headers, rows: maxacos,   count: maxacos.length });
-
-    // ── Campaign Budget (col Z) & Campaign Paused (col AA) ──────────────────
-    // Operates on Entity="Campaign" rows only — not keyword/target rows.
-    // Placement adjustment rows (non-empty Placement column) are skipped so
-    // only the single base campaign row is touched per campaign.
-    const campBudget = [], campPaused = [];
-
-    const campaignBaseRows = dataRows.filter(row => {
-      // Rule 1: If Entity column exists, row MUST be Entity="Campaign".
-      //         Covers SP, SB and SD — all use "Campaign" for campaign rows.
+      // ── Campaign Budget (col Z) & Campaign Paused (col AA) ──
+      // Same original campaign-base-row rules, evaluated in the same pass.
+      let isCampaignBase = true;
       if (cols.entity >= 0) {
         const ev = String(row[cols.entity] || '').trim().toLowerCase();
-        if (ev !== 'campaign') return false;
+        if (ev !== 'campaign') isCampaignBase = false;
       }
+      if (isCampaignBase && cols.placement >= 0 && String(row[cols.placement] || '').trim() !== '') isCampaignBase = false;
+      if (isCampaignBase && cols.bid >= 0 && row[cols.bid] !== undefined && row[cols.bid] !== null && String(row[cols.bid]).trim() !== '') isCampaignBase = false;
 
-      // Rule 2: Skip SP placement-adjustment rows which also carry Entity="Campaign"
-      //         but have a non-empty Placement column (e.g. "Top of Search").
-      if (cols.placement >= 0 && String(row[cols.placement] || '').trim() !== '') return false;
+      if (isCampaignBase && tmpl) {
+        const stateVal = cols.state >= 0 ? String(row[cols.state] || '').toLowerCase().trim() : '';
 
-      // Rule 3: Campaign rows never have a Bid value — only keyword/target rows do.
-      //         This is the universal signal across SP, SB and SD.
-      if (cols.bid >= 0 && row[cols.bid] !== undefined && row[cols.bid] !== null && String(row[cols.bid]).trim() !== '') return false;
+        if (tmpl.dailyBudget !== null && cols.dailyBudget >= 0) {
+          const nr = [...row];
+          nr[cols.dailyBudget] = tmpl.dailyBudget;
+          nr[cols.operation] = 'update';
+          campBudget.push(nr);
+        }
 
-      // Rule 4: Must resolve a campaign name, otherwise we can't match the template.
-      const cn = getCampaignName(row, cols);
-      return !!cn;
-    });
-
-    for (const row of campaignBaseRows) {
-      const cn = getCampaignName(row, cols);
-      if (!cn) continue;
-      let tmpl;
-      for (const t of templateRows) { if (matchesCampaign(cn, t.campaign)) { tmpl = t; break; } }
-      if (!tmpl) continue;
-
-      const stateVal = cols.state >= 0 ? String(row[cols.state] || '').toLowerCase().trim() : '';
-
-      // Campaign Budget: take the full campaign row, update Daily Budget to template Z value
-      if (tmpl.dailyBudget !== null && cols.dailyBudget >= 0) {
-        const nr = [...row];
-        nr[cols.dailyBudget] = tmpl.dailyBudget;
-        nr[cols.operation]   = 'update';
-        campBudget.push(nr);
-      }
-
-      // Campaign Paused: take the full campaign row, set State to "paused"
-      if (tmpl.pauseCampaign && cols.state >= 0 && stateVal !== 'paused' && stateVal !== 'archived') {
-        const nr = [...row];
-        nr[cols.state]     = 'paused';
-        nr[cols.operation] = 'update';
-        campPaused.push(nr);
+        if (tmpl.pauseCampaign && cols.state >= 0 && stateVal !== 'paused' && stateVal !== 'archived') {
+          const nr = [...row];
+          nr[cols.state] = 'paused';
+          nr[cols.operation] = 'update';
+          campPaused.push(nr);
+        }
       }
     }
 
+    processingLog.push({
+      tab: cfg.key,
+      sheetFound: sheetName,
+      totalRows,
+      eligibleRows,
+      matchedCampaigns: matchedCampaignNames.size,
+      campaigns: [...matchedCampaignNames].slice(0, 20),
+    });
+
+    if (bleeders.length)  results.push({ tabName: cfg.key, category: 'Bleeders',        headers, rows: bleeders,   count: bleeders.length });
+    if (minacos.length)   results.push({ tabName: cfg.key, category: 'MINACOS',          headers, rows: minacos,    count: minacos.length });
+    if (lowclicks.length) results.push({ tabName: cfg.key, category: 'Low Clicks Boost', headers, rows: lowclicks,  count: lowclicks.length });
+    if (maxacos.length)   results.push({ tabName: cfg.key, category: 'MAXACOS',          headers, rows: maxacos,    count: maxacos.length });
     if (campBudget.length) results.push({ tabName: cfg.key, category: 'Campaign Budget', headers, rows: campBudget, count: campBudget.length });
     if (campPaused.length) results.push({ tabName: cfg.key, category: 'Campaign Paused', headers, rows: campPaused, count: campPaused.length });
   }
 
-  // Build individual XLSX object URLs
+  // Build individual XLSX object URLs exactly as before.
   downloadLinks = results.map(r => buildLink(r));
 
   renderResults();
