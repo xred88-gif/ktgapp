@@ -484,6 +484,35 @@ function parseBulk(wb){
   if(!sheet || !sheet['!ref']) return {headers:[],sheet:null,startRow:0,endRow:-1,colIndex:{}};
 
   var range=XLSX.utils.decode_range(sheet['!ref']);
+  // Amazon bulk exports can declare a header-only !ref (e.g. A1:BB1) even
+  // though SheetJS has loaded thousands of actual worksheet rows. Read the
+  // populated cells rather than trusting that stale range. Keep all business
+  // rules, sheet values and output formatting unchanged.
+  if(Array.isArray(sheet)){
+    for(var rr=sheet.length-1;rr>=range.s.r;rr--){
+      var actualRow=sheet[rr];
+      if(!actualRow) continue;
+      var lastCol=-1;
+      for(var cc=actualRow.length-1;cc>=0;cc--){
+        if(actualRow[cc] && actualRow[cc].v!==undefined && actualRow[cc].v!==null){lastCol=cc;break;}
+      }
+      if(lastCol<0) continue;
+      if(rr>range.e.r) range.e.r=rr;
+      if(lastCol>range.e.c) range.e.c=lastCol;
+      break;
+    }
+    // Headers may be wider than the last populated data row.
+    if(sheet[range.s.r] && sheet[range.s.r].length-1>range.e.c)
+      range.e.c=sheet[range.s.r].length-1;
+  }else{
+    // Also support non-dense workbooks where the declared range is stale.
+    Object.keys(sheet).forEach(function(addr){
+      if(!/^[A-Z]+[1-9][0-9]*$/.test(addr)) return;
+      var pos=XLSX.utils.decode_cell(addr);
+      if(pos.r>range.e.r) range.e.r=pos.r;
+      if(pos.c>range.e.c) range.e.c=pos.c;
+    });
+  }
   var hIdx=range.s.r;
 
   // Find the real header row without materializing the whole worksheet.
