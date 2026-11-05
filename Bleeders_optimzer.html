@@ -1284,10 +1284,28 @@ function readExcel(file,cb){
   var reader=new FileReader();
   reader.onload=function(e){
     try{
-      var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,dateNF:'yyyy-mm-dd'});
+      var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,dateNF:'yyyy-mm-dd',nodim:true});
       var data={};
       wb.SheetNames.forEach(function(n){
-        data[n]=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:'',raw:false});
+        var ws=wb.Sheets[n];
+        // Amazon bulk exports may declare !ref=A1 even when thousands of
+        // populated cells exist. Recalculate the bounds from actual cells
+        // before converting to rows. Do not alter any application rules.
+        var range=null;
+        Object.keys(ws).forEach(function(addr){
+          if(addr.charAt(0)==='!') return;
+          if(!/^[A-Z]+[1-9][0-9]*$/i.test(addr)) return;
+          var pos=XLSX.utils.decode_cell(addr);
+          if(!range) range={s:{r:pos.r,c:pos.c},e:{r:pos.r,c:pos.c}};
+          else {
+            range.s.r=Math.min(range.s.r,pos.r);
+            range.s.c=Math.min(range.s.c,pos.c);
+            range.e.r=Math.max(range.e.r,pos.r);
+            range.e.c=Math.max(range.e.c,pos.c);
+          }
+        });
+        if(range) ws['!ref']=XLSX.utils.encode_range(range);
+        data[n]=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
       });
       cb(null,wb,data,file.name.replace(/\.[^.]+$/,''));
     }catch(err){cb(err);}
