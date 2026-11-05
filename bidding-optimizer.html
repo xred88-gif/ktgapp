@@ -729,8 +729,31 @@ function getBleederSettings() {
 // Large-file helpers: support SheetJS dense worksheets without materializing
 // hundreds of thousands of rows into a second giant JavaScript array.
 function getSheetRange(sheet) {
-  if (!sheet || !sheet['!ref']) return null;
-  try { return XLSX.utils.decode_range(sheet['!ref']); } catch (_) { return null; }
+  if (!sheet) return null;
+  let range = null;
+  try { if (sheet['!ref']) range = XLSX.utils.decode_range(sheet['!ref']); } catch (_) {}
+
+  // Amazon bulk exports sometimes declare a header-only !ref (for example A1:BB1)
+  // despite containing thousands of populated rows. Use the actual dense rows
+  // rather than the incorrect declaration, without changing any bidding rules.
+  const denseRows = Array.isArray(sheet) ? sheet : sheet['!data'];
+  if (Array.isArray(denseRows)) {
+    let lastRow = denseRows.length - 1;
+    while (lastRow >= 0 && (!denseRows[lastRow] || denseRows[lastRow].length === 0)) lastRow--;
+    if (lastRow >= 0) {
+      let lastCol = range ? range.e.c : 0;
+      const firstRow = range ? range.s.r : 0;
+      // The column schema is on the header row; scanning it avoids a costly
+      // full-cell pass over large advertising workbooks.
+      const header = denseRows[firstRow] || denseRows[0] || [];
+      for (let c = header.length - 1; c >= 0; c--) {
+        if (header[c] !== undefined && header[c] !== null) { lastCol = Math.max(lastCol, c); break; }
+      }
+      if (!range) range = { s: { r: 0, c: 0 }, e: { r: lastRow, c: lastCol } };
+      else { range.e.r = Math.max(range.e.r, lastRow); range.e.c = Math.max(range.e.c, lastCol); }
+    }
+  }
+  return range;
 }
 
 function getSheetCellValue(sheet, r, c) {
@@ -895,6 +918,13 @@ function processFiles() {
           const nr = [...row];
           nr[cols.dailyBudget] = tmpl.dailyBudget;
           nr[cols.operation] = 'update';
+          // SB Campaign Budget output only: leave these two fields empty.
+          if (cfg.key === 'SB Multi Ad Group Campaigns') {
+            const bidOptimizationCol = findCol(headers, 'Bid Optimization');
+            const startDateCol = findCol(headers, 'Start Date');
+            if (bidOptimizationCol >= 0) nr[bidOptimizationCol] = '';
+            if (startDateCol >= 0) nr[startDateCol] = '';
+          }
           campBudget.push(nr);
         }
 
