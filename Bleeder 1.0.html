@@ -318,7 +318,30 @@
     const data=[keepCols, ...rows.map(r => keepCols.map(h => (r[h]===undefined? "": r[h])))];
     return XLSX.utils.aoa_to_sheet(data);
   }
-  function readFile(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:"array"}));}catch(err){rej(err);}};fr.onerror=rej;fr.readAsArrayBuffer(file);});}
+  // Amazon bulk exports can declare an incorrect worksheet dimension (e.g. A1:BB1)
+  // even when thousands of data rows exist. Ignore that declared range on import.
+  function readFile(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>{try{
+    const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array",nodim:true});
+    // Also fix a stale !ref if the parser loaded cells beyond the declared range.
+    for(const name of wb.SheetNames){
+      const ws=wb.Sheets[name];
+      if(!ws) continue;
+      const ref=ws["!ref"];
+      const declared=ref ? XLSX.utils.decode_range(ref) : null;
+      let maxR=declared ? declared.e.r : 0, maxC=declared ? declared.e.c : 0;
+      let minR=declared ? declared.s.r : Infinity, minC=declared ? declared.s.c : Infinity;
+      for(const key of Object.keys(ws)){
+        if(key[0]==="!") continue;
+        const cell=XLSX.utils.decode_cell(key);
+        if(cell.r>maxR) maxR=cell.r;
+        if(cell.c>maxC) maxC=cell.c;
+        if(cell.r<minR) minR=cell.r;
+        if(cell.c<minC) minC=cell.c;
+      }
+      if(minR!==Infinity) ws["!ref"]=XLSX.utils.encode_range({s:{r:minR,c:minC},e:{r:maxR,c:maxC}});
+    }
+    res(wb);
+  }catch(err){rej(err);}};fr.onerror=rej;fr.readAsArrayBuffer(file);});}
   function sheetToJSON(ws){return XLSX.utils.sheet_to_json(ws,{defval:""});}
   function setStatus(t,ok=false){const s=document.getElementById("status");const d=document.getElementById("statusDot");const tx=document.getElementById("statusText");s.classList.remove("hidden");tx.textContent=t;d.classList.toggle("ok",ok);}
 
