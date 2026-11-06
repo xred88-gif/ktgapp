@@ -395,9 +395,11 @@ function markLoaded(type,name){
 }
 function checkReady(){ document.getElementById('processBtn').disabled=!(templateWB&&bulkWB); }
 
-// Normalize campaign names: trim and collapse all internal whitespace to single spaces
+// Exact full campaign-name matching for every rule (placements, budgets and bids).
+// Only trim leading/trailing whitespace; preserve all characters inside the name.
+// Never use partial, substring, prefix or whitespace-collapsed matches.
 function normCampaignName(raw){
-  return String(raw||'').trim().replace(/\s+/g,' ');
+  return String(raw===undefined||raw===null?'':raw).trim();
 }
 
 function normPlacement(raw){
