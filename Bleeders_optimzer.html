@@ -1739,37 +1739,31 @@ function doProcess(){
           rec = Object.assign({}, rec, {matchType: bleederMatchType});
         }
 
-        // ── Cross-campaign ID guard ──────────────────────────────────────
-        // T5/T6/T6b are single-term fallbacks that may match a record from a
-        // DIFFERENT campaign. If the matched record's campaign name doesn't
-        // agree with the bleeder's campaign name, the term does NOT exist in
-        // the source for this campaign — skip the row entirely and warn the user.
-        // Outputting it with wrong IDs would create a duplicate error on Amazon;
-        // outputting it with empty IDs would add the negative to the wrong place.
-        var isSingleFallback = (how==='T5:kw+mt'||how==='T6:single'||
-                                how==='T6b:single-alt'||how==='T6b:double-alt'||
-                                how==='T6b:triple-alt'||how==='T6b:quad-alt');
-        if(isSingleFallback){
-          var recCampNorm = NT(S(rec.campName)||S(rec.campNameInfo)||'');
-          var blCampNorm  = NT(campName||'');
-          if(blCampNorm && recCampNorm && recCampNorm !== blCampNorm){
-            counts.notInSource++;
-            counts.skipped++;
-            notInSourceWarnings.push({
-              tab:   def.label,
-              camp:  campName,
-              adg:   adgName,
-              term:  term,
-              action:actionStr
-            });
-            prev.push([
-              def.label,
-              campName||'—', adgName||'—', term||'—', actionStr,
-              '⚠', 'NOT IN SOURCE — skipped', '',
-              '—','—','—','—','—','—','—',''
-            ]);
-            continue;
-          }
+        // ── Mandatory exact full campaign-name guard ───────────────────────
+        // Applies to EVERY lookup tier, including keyword-only fallbacks.
+        // Never allow a matching term, ASIN, ad group, or partial campaign name
+        // to cause an action on a different campaign. Both names must exist
+        // and match completely (not a substring or case-insensitive variant).
+        var sourceCampaignName = S(rec.campName || rec.campNameInfo || '');
+        var requestedCampaignName = S(campName);
+        if(!requestedCampaignName || !sourceCampaignName ||
+           sourceCampaignName !== requestedCampaignName){
+          counts.notInSource++;
+          counts.skipped++;
+          notInSourceWarnings.push({
+            tab: def.label,
+            camp: campName,
+            adg: adgName,
+            term: term,
+            action: actionStr
+          });
+          prev.push([
+            def.label,
+            campName||'—', adgName||'—', term||'—', actionStr,
+            '⚠', 'CAMPAIGN NAME NOT EXACT — skipped', '',
+            '—','—','—','—','—','—','—',''
+          ]);
+          continue;
         }
         counts.matched++;
       } else {
