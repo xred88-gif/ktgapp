@@ -416,7 +416,7 @@ function parseTemplate(workbook) {
     const row = rawData[i];
     const fmtRow = fmtData[i] || [];
     if (!row || !row[0]) continue;
-    const campaign = String(row[0] || '').trim().replace(/\s+/g, ' ');
+    const campaign = String(row[0] || '').trim();
     if (!campaign) continue;
 
     // For columns V(21) W(22) X(23) Y(24): use formatted value if available so
@@ -674,16 +674,16 @@ function getColMap(headers) {
 
 function getCampaignName(row, cols) {
   let name = '';
-  if (cols.campaignNameInfo >= 0 && row[cols.campaignNameInfo]) name = String(row[cols.campaignNameInfo]).trim().replace(/\s+/g, ' ');
-  if (!name && cols.campaignName >= 0 && row[cols.campaignName]) name = String(row[cols.campaignName]).trim().replace(/\s+/g, ' ');
+  if (cols.campaignNameInfo >= 0 && row[cols.campaignNameInfo]) name = String(row[cols.campaignNameInfo]).trim();
+  if (!name && cols.campaignName >= 0 && row[cols.campaignName]) name = String(row[cols.campaignName]).trim();
   return name;
 }
 
 function matchesCampaign(rowName, tmplName) {
   if (!rowName || !tmplName) return false;
-  const r = rowName.replace(/\s+/g, ' ').toLowerCase();
-  const t = tmplName.replace(/\s+/g, ' ').toLowerCase();
-  return r === t || r.includes(t) || t.includes(r);
+  // Full-name exact match only: never apply a shorter campaign's rules
+  // to another campaign that contains that name (or vice versa).
+  return rowName.trim() === tmplName.trim();
 }
 
 function isEligible(row, cols, tabName) {
@@ -808,8 +808,8 @@ function processFiles() {
     const headers = readSheetRow(sheet, range.s.r, range.s.c, range.e.c).map(h => String(h || ''));
     const cols = getColMap(headers);
 
-    // Cache campaign -> matching template. This preserves the original fuzzy
-    // matching rules while avoiding a repeated template scan for every row.
+    // Cache campaign -> exact full-name template match, avoiding a repeated
+    // template scan for every row.
     const campMap = new Map();
     function templateForCampaign(cn) {
       if (!cn) return null;
